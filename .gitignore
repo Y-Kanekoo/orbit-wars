@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets
+.env
+.env.*
+!.env.example
+kaggle.json
+.kaggle/
+
+# Kaggle artifacts (big)
+*.tar.gz
+data/raw/
+data/external/
+
+# Experiment artifacts
+experiments/replays/*.json
+experiments/logs/*.log
+experiments/checkpoints/
+**/wandb/
+**/mlruns/
+
+# Build
+build/
+dist/
+*.onnx
+*.pt
+*.pth
+*.pkl
+!docs/**/*.pkl
+
+# Local scratch
+scratch/
+*.local.md
