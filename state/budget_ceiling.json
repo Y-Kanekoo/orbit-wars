@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "daily_usd_estimated_cap": 50.0,
+  "daily_usd_warning_threshold": 35.0,
+  "iteration_max_hours": 1.5,
+  "iteration_max_token_pct_5h": 80,
+  "weekly_total_hours_cap": 40,
+  "action_on_warning": "alert via daily_report and recommend prompt shortening",
+  "action_on_cap": "kill tmux session and require manual restart",
+  "rationale": "iter 1 で $11/1hr、iter 2 序盤で $14/3hr 観測。1 iter 1.5 hr 超は orchestrator prompt の見直し対象。",
+  "notes": "claude の使用量はプロセス外から制御不能なため、本ファイルは soft cap。check_budget.sh が daily_report で警告し、ユーザが手動 kill する運用。"
+}
