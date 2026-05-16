@@ -51,7 +51,9 @@ def test_parse_skips_malformed_planet() -> None:
 
 
 def test_parse_skips_malformed_fleet() -> None:
-    o = observation.parse({"player": 0, "planets": [], "fleets": [[], [1, 0, 10.0, 10.0, 0.5, 0, 3]]})
+    o = observation.parse(
+        {"player": 0, "planets": [], "fleets": [[], [1, 0, 10.0, 10.0, 0.5, 0, 3]]}
+    )
     assert len(o.fleets) == 1
     assert o.fleets[0].ships == 3
 
