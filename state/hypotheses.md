@@ -20,7 +20,8 @@ B-7 (Phase 0 完了基準) として ≥ 10 件の populate が必要 (PLAN.md L
 
 | id | status | phase | priority | effort_hr | expected_gain_lb | hypothesis | validation_method | refs |
 |---|---|---|---|---|---|---|---|---|
-| H001 | active | 1 | 5 | 3 | +80 | territory control map (100x100 cell の最近接 own planet 距離) を eval に加算 (係数 0.3) | vs nearest_sniper N=30 winrate≥70% | PLAN.md L266 |
+| H000 | active | 1 | 5 | 4 | +0 (基盤) | 移植 parity 修復: 移植 beam (territory なし) vs legacy-388 で N=30 winrate 0.40-0.60 を達成。main.py wrapper の per-turn fallback pre-call / numpy lazy import / budget 計算を切り分け、legacy と同等の探索結果を得る | parity check pass (winrate 0.40-0.60 N=30) | learned_rules.md AVOID phase1_baseline_port_parity_skip; exp/001 discard 結果 |
+| H001 | stuck | 1 | 5 | 3 | +80 | territory control map (100x100 cell の最近接 own planet 距離) を eval に加算 (係数 0.3) | vs nearest_sniper N=30 winrate≥70% | PLAN.md L266; exp/001 で discard、parity check 未通過 (learned_rules.md AVOID phase1_baseline_port_parity_skip)。parity 修復後に再評価 |
 | H002 | active | 1 | 5 | 4 | +100 | 30 turn 先までの ship 在庫 projection (production + incoming fleet 減算) を eval に加算 (係数 0.5) | vs H001 N=30 winrate≥55%、LB ≥800 | PLAN.md L268 |
 | H003 | active | 1 | 5 | 3 | +120 | 敵 fleet ETA matrix から計算した threat を eval から減算 (係数 0.7) | vs H002 N=30 winrate≥55%、LB ≥900 | PLAN.md L270 |
 | H004 | active | 1 | 4 | 6 | +60 | per-turn beam depth=2 width=16 (compound action 1 整数圧縮)、time-budget gating で 200ms | vs heuristic N=50 winrate≥55%、max_act_ms<300 | PLAN.md L259 |
