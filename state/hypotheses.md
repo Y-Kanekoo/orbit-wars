@@ -20,7 +20,7 @@ B-7 (Phase 0 完了基準) として ≥ 10 件の populate が必要 (PLAN.md L
 
 | id | status | phase | priority | effort_hr | expected_gain_lb | hypothesis | validation_method | refs |
 |---|---|---|---|---|---|---|---|---|
-| H000 | active | 1 | 5 | 4 | +0 (基盤) | 移植 parity 修復: 移植 beam (territory なし) vs legacy-388 で N=30 winrate 0.40-0.60 を達成。main.py wrapper の per-turn fallback pre-call / numpy lazy import / budget 計算を切り分け、legacy と同等の探索結果を得る | parity check pass (winrate 0.40-0.60 N=30) | learned_rules.md AVOID phase1_baseline_port_parity_skip; exp/001 discard 結果 |
+| H000 | in_progress | 1 | 5 | 4 | +0 (基盤) | 移植 parity 修復: exp/000 で wrapper bypass (main_bare), territory 短絡, mirror N=10 異常検出まで切り分け済。残課題: env.run 経由で legacy が有利になる import 解決の特定。次イテレーションで main_bare の import を legacy 方式 (relative+except fallback) に揃えて N=30 再測定 | parity check pass (winrate 0.40-0.60 N=30) | learned_rules.md AVOID phase1_baseline_port_parity_skip / mirror_match_shared_src_import / INFO port_beam_search_works_in_isolation_but_not_in_env_run; exp/000-parity-fix branch |
 | H001 | stuck | 1 | 5 | 3 | +80 | territory control map (100x100 cell の最近接 own planet 距離) を eval に加算 (係数 0.3) | vs nearest_sniper N=30 winrate≥70% | PLAN.md L266; exp/001 で discard、parity check 未通過 (learned_rules.md AVOID phase1_baseline_port_parity_skip)。parity 修復後に再評価 |
 | H002 | active | 1 | 5 | 4 | +100 | 30 turn 先までの ship 在庫 projection (production + incoming fleet 減算) を eval に加算 (係数 0.5) | vs H001 N=30 winrate≥55%、LB ≥800 | PLAN.md L268 |
 | H003 | active | 1 | 5 | 3 | +120 | 敵 fleet ETA matrix から計算した threat を eval から減算 (係数 0.7) | vs H002 N=30 winrate≥55%、LB ≥900 | PLAN.md L270 |
