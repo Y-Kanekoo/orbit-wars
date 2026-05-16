@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pytest:*)",
+      "Bash(kaggle:*)",
+      "Bash(ruff:*)",
+      "Bash(black:*)",
+      "Bash(tar:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(jq:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(echo:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(chmod:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(test:*)",
+      "Bash(stat:*)",
+      "Bash(date:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(diff:*)",
+      "Bash(which:*)",
+      "Bash(command:*)",
+      "Bash(bash scripts/:*)",
+      "Bash(tmux:*)",
+      "Read",
+      "Edit",
+      "Write",
+      "Grep",
+      "Glob",
+      "Skill",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(:*--no-verify:*)",
+      "Bash(eval:*)",
+      "Bash(curl:*| sh)",
+      "Bash(wget:*| sh)",
+      "Bash(:*>/etc/:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": ".claude/hooks/guard-dangerous-bash.sh"},
+          {"type": "command", "command": ".claude/hooks/kaggle-quota-guard.sh"}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {"type": "command", "command": ".claude/hooks/auto-lint-fmt.sh"}
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": ".claude/hooks/record-submission.sh"}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": ".claude/hooks/analyze-deviations.sh"},
+          {"type": "command", "command": ".claude/hooks/auto-commit-safe.sh"},
+          {"type": "command", "command": ".claude/hooks/trigger-next-iteration.sh"}
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": ".claude/hooks/load-state.sh"}
+        ]
+      }
+    ]
+  },
+  "model": "claude-opus-4-7"
+}
