@@ -6,12 +6,14 @@
   "played_episodes": null,
   "local_winrate_vs_random": null,
   "local_winrate_vs_nearest_sniper": null,
-  "local_winrate_vs_prev_best": null,
+  "local_winrate_vs_prev_best": 0.5333,
+  "local_winrate_vs_prev_best_n": 30,
+  "local_winrate_vs_prev_best_measured_at": "2026-05-17T01:30:00Z",
   "submission_id": 52032932,
   "branch": "main",
   "merged_at": "2026-04-25T13:19:25Z",
   "agent_file": "main.py",
   "agent_sha": null,
-  "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16)",
-  "notes": "新規実装着手前の参考スコア。新規 agent 初提出時に上書き予定。"
+  "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16) + parity fix (PR #37)",
+  "notes": "PARITY 確定: 移植 beam (main.py) vs legacy-388 N=30 winrate 0.5333 (16-14, errors=0)。期待 0.40-0.60 範囲内。Phase 1 hypothesis 着手可能。LB 提出は未実施 (新規 agent 提出時に lb_score 上書き予定)。"
 }
