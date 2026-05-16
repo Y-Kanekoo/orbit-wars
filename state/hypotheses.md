@@ -20,7 +20,26 @@ B-7 (Phase 0 完了基準) として ≥ 10 件の populate が必要 (PLAN.md L
 
 | id | status | phase | priority | effort_hr | expected_gain_lb | hypothesis | validation_method | refs |
 |---|---|---|---|---|---|---|---|---|
-| - | - | - | - | - | - | (researcher が populate 予定) | - | - |
+| H001 | active | 1 | 5 | 3 | +80 | territory control map (100x100 cell の最近接 own planet 距離) を eval に加算 (係数 0.3) | vs nearest_sniper N=30 winrate≥70% | PLAN.md L266 |
+| H002 | active | 1 | 5 | 4 | +100 | 30 turn 先までの ship 在庫 projection (production + incoming fleet 減算) を eval に加算 (係数 0.5) | vs H001 N=30 winrate≥55%、LB ≥800 | PLAN.md L268 |
+| H003 | active | 1 | 5 | 3 | +120 | 敵 fleet ETA matrix から計算した threat を eval から減算 (係数 0.7) | vs H002 N=30 winrate≥55%、LB ≥900 | PLAN.md L270 |
+| H004 | active | 1 | 4 | 6 | +60 | per-turn beam depth=2 width=16 (compound action 1 整数圧縮)、time-budget gating で 200ms | vs heuristic N=50 winrate≥55%、max_act_ms<300 | PLAN.md L259 |
+| H005 | active | 1 | 4 | 4 | +50 | sun blocking aware path planning: fleet 経路が sun を切るか事前判定して候補から除外 | vs H004 N=30 winrate≥55% | PLAN.md L271, B-12 |
+| H006 | active | 1 | 4 | 5 | +50 | comet pre-positioning: step 40/140/240/340/440 で comet spawn 予測 zone に事前派兵 | vs H003 N=30 winrate≥55% | PLAN.md L270 |
+| H007 | active | 1 | 3 | 6 | +50 | eval 係数の grid search (territory 0.1-0.5 / projection 0.3-0.8 / threat 0.5-1.0) | best 組合せ vs default N=30 winrate≥55% | PLAN.md L272 |
+| H008 | active | 1 | 4 | 3 | +30 | beam の action_gen で空 action set `[]` も必ず候補に含める ("do nothing" 評価) | vs H004 N=30 winrate>50% (= 棄損しない) | PLAN.md B-8 |
+| H009 | active | 1 | 4 | 5 | +60 | multi-launch per planet: 1 turn の compound action を最大 K=3-5 launch list で生成 | vs H004 N=30 winrate≥55% | PLAN.md B-3 |
+| H010 | active | 1 | 3 | 4 | +40 | depth-1 defensive minimax (自分 1 手 → 敵最悪応手) を eval に組込 | vs H003 N=30 winrate≥55% | PLAN.md B-12 |
+| H011 | active | 2 | 5 | 8 | +150 | PUCT-MCTS、rollout 200-400 (1秒予算)、rollout policy = Phase 1 heuristic | vs Phase 1 best N=50 winrate≥65%、LB ≥950 | PLAN.md L294, 303 |
+| H012 | active | 2 | 4 | 4 | +50 | MCTS progressive widening (k=0.3-1.0 sweep) | best k vs default k N=30 winrate≥55% | PLAN.md L304 |
+| H013 | active | 2 | 3 | 6 | +70 | offline opponent classifier (expansion/aggression/comet_priority 3-class) + online dispatch | vs MCTS w/o dispatch N=30 winrate≥55% | PLAN.md L308 |
+| H014 | active | 2 | 3 | 6 | +30 | MCTS transposition table (Zobrist hash) で同一状態再訪コスト排除 | rollout/sec が 1.5-2x | PLAN.md A-16 |
+| H015 | active | 2 | 3 | 5 | +50 | RAVE / AMAF rollout 共有 | vs base MCTS N=30 winrate≥55% | PLAN.md L309 |
+| H016 | active | 3 | 4 | 16 | +100 | Transformer encoder (planets+fleets を token、4-layer/d=64) + NN value head のみ (policy は MCTS visit dist) | vs Phase 2 best N=30 winrate≥55%、LB ≥1100 | PLAN.md L328-334, L349 |
+| H017 | active | 3 | 4 | 8 | +80 | NN policy prior 追加 (AlphaZero 風 (value, policy_logits) 出力) | vs H016 N=30 winrate≥55% | PLAN.md L350 |
+| H018 | active | 3 | 3 | 6 | +40 | 4-fold symmetry data augmentation (90/180/270° rotation で学習データ 4倍) | 学習収束が 1/4 epoch で同等 loss | PLAN.md B-5 |
+| H019 | active | 4 | 4 | 6 | +80 | 戦況分類 (序盤/中盤/終盤/危機) に基づく dynamic dispatch (NN/MCTS/heuristic 切替) | vs Phase 3 N=30 winrate≥55%、LB ≥1300 | PLAN.md L380-381 |
+| H020 | active | 4 | 3 | 5 | +50 | endgame all-in mode (残 1 敵かつ自軍 ship 数 > 敵×1.5 で全 fleet 集中派兵) | endgame での勝率 +20% | PLAN.md A-19 |
 
 ## In progress
 
