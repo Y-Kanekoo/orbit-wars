@@ -7,7 +7,6 @@ import os
 import sys
 from typing import Any
 
-
 _LEVEL = os.environ.get("LOG_LEVEL", "normal").lower()  # silent | normal | verbose
 
 

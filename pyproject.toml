@@ -8,6 +8,9 @@ readme = "README.md"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = [
+    "docs/competition",  # Kaggle 配布 starter コード + legacy-388 リファレンス
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
@@ -16,6 +19,9 @@ ignore = ["E501"]  # black に任せる
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+extend-exclude = '''
+^/docs/competition/
+'''
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
