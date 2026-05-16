@@ -1,0 +1,10 @@
+{
+  "version": 0,
+  "lb_score": 388.6,
+  "local_winrate": null,
+  "submission_id": 52032932,
+  "branch": null,
+  "merged_at": "2026-04-25",
+  "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16)",
+  "notes": "新規実装着手前の参考スコア。新規 agent の初提出時に上書き予定。"
+}
