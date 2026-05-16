@@ -9,9 +9,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_ROOT = Path(__file__).resolve().parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+# kaggle_environments の agent loader は空 globals で exec() するため __file__ 不在。
+# NameError を捕捉し、その場合は kaggle agent loader 側で exec_dir が既に
+# sys.path に append 済 (agent.py L53) なので何もしない。
+try:
+    _ROOT = Path(__file__).resolve().parent
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+except NameError:
+    pass
 
 from src.search.beam import search as _beam_search  # noqa: E402
 
