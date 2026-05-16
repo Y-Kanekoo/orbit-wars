@@ -1,0 +1,17 @@
+# Phase 0-2 ランタイム依存 (ローカル開発・self-play 評価用)
+# Phase 3 以降は torch / onnx / onnxruntime / optuna を追加予定
+# 各バージョンは Kaggle Notebook 環境 (2026-05 時点) と整合性を取る
+
+# Kaggle 公式 CLI と環境
+kaggle>=1.6.0
+kaggle-environments>=1.28.0
+
+# 数値計算 (heuristic / search 用)
+numpy>=1.26
+scipy>=1.11
+
+# 開発ツール
+ruff>=0.4.0
+black>=24.0
+pytest>=8.0
+pytest-xdist>=3.5  # 並列 self-play match
