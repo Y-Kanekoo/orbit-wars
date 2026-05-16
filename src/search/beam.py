@@ -21,9 +21,7 @@ ENEMY_CANDIDATES = 3
 NEUTRAL_CANDIDATES = 3
 FRIENDLY_CANDIDATES = 1
 TIME_GUARD_RATIO = 0.8
-TERRITORY_WEIGHT = (
-    0.0  # H001 default off (H000 parity 修復前は無効化、territory 計算自体も `if` で短絡)
-)
+TERRITORY_WEIGHT = 0.3  # H001 revisit (exp/002): PARITY 修復後の純粋効果測定
 TERRITORY_SCALE = 100.0  # territory_share (0..1) を _score_state スケールに揃える
 
 
