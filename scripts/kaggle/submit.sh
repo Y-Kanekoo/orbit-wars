@@ -26,8 +26,11 @@ echo "[submit] step 1: verify_submission"
 bash scripts/kaggle/verify_submission.sh "$AGENT"
 
 echo "[submit] step 2: pack submission.tar.gz"
-PACK=$(mktemp -t orbit-wars-pack-XXXX.tar.gz)
-trap 'rm -f "$PACK"' EXIT
+# macOS BSD mktemp は -t template で末尾にランダム suffix を追加するため、
+# .tar.gz 拡張子を確実に保つには dir を作ってからファイル名固定で配置する
+TMPPACKDIR=$(mktemp -d -t orbit-wars-pack-XXXX)
+PACK="$TMPPACKDIR/submission.tar.gz"
+trap 'rm -rf "$TMPPACKDIR"' EXIT
 
 # main.py が src/ を import するか判定
 if grep -qE 'from[[:space:]]+src\.' "$AGENT" || grep -qE 'import[[:space:]]+src\.' "$AGENT"; then
