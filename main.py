@@ -15,10 +15,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Kaggle で main.py が repo root 外に置かれて実行されるケースに備える
-_ROOT = Path(__file__).resolve().parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+# Kaggle で main.py が repo root 外に置かれて実行されるケースに備える。
+# 注: kaggle_environments の agent loader は空 globals で exec() するため
+# __file__ が env に注入されない。NameError を捕捉し、その場合は
+# kaggle agent loader が既に exec_dir を sys.path に append 済 (agent.py L53)
+# なので sys.path 操作は不要。
+try:
+    _ROOT = Path(__file__).resolve().parent
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+except NameError:
+    # kaggle_environments exec context: __file__ 不在
+    pass
 
 from src.agents.safe_fallback import act as _safe_act  # noqa: E402
 from src.search.beam import search as _beam_search  # noqa: E402
