@@ -21,7 +21,9 @@ ENEMY_CANDIDATES = 3
 NEUTRAL_CANDIDATES = 3
 FRIENDLY_CANDIDATES = 1
 TIME_GUARD_RATIO = 0.8
-TERRITORY_WEIGHT = 0.3  # H001 係数 (hypotheses.md L23)
+TERRITORY_WEIGHT = (
+    0.0  # H001 default off (H000 parity 修復前は無効化、territory 計算自体も `if` で短絡)
+)
 TERRITORY_SCALE = 100.0  # territory_share (0..1) を _score_state スケールに揃える
 
 
@@ -379,7 +381,8 @@ def _score_state(state: SearchState, player: int) -> float:
         elif fleet.owner >= 0:
             total -= fleet.ships * 0.6
 
-    total += TERRITORY_WEIGHT * _territory_term(state, player)
+    if TERRITORY_WEIGHT > 0.0:
+        total += TERRITORY_WEIGHT * _territory_term(state, player)
     return total
 
 
