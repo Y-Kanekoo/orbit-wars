@@ -21,16 +21,26 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.agents.safe_fallback import act as _safe_act  # noqa: E402
+from src.search.beam import search as _beam_search  # noqa: E402
 from src.utils import action as _action  # noqa: E402
 from src.utils import telemetry as _tel  # noqa: E402
 from src.utils.timing import Timer  # noqa: E402
 
+_BEAM_TIME_BUDGET_SEC = 0.3
+
 
 def _core_act(obs: Any, deadline: float) -> list[list[Any]]:
-    """Phase 1+ で heuristic/MCTS/NN を差し替える本体。
-    Phase 0 では safe_act と同じ実装。
+    """Phase 1+ heuristic 本体: legacy-388 移植 beam + H001 territory eval。
+
+    deadline (monotonic 絶対時刻) から残予算を計算し、beam に渡す。
+    残予算が 0 以下なら safe_act にフォールバック。
     """
-    return _safe_act(obs)
+    remaining = max(0.0, deadline - time.monotonic())
+    budget = min(_BEAM_TIME_BUDGET_SEC, remaining)
+    if budget <= 0.05:
+        return _safe_act(obs)
+    player = int(obs.get("player", 0)) if isinstance(obs, dict) else int(getattr(obs, "player", 0))
+    return _beam_search(obs, player, time_budget_sec=budget)
 
 
 def agent(obs: Any) -> list[list[Any]]:
