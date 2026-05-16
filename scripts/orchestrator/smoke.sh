@@ -48,6 +48,18 @@ check "experiments/ledger.jsonl 存在" "test -f experiments/ledger.jsonl"
 check "docs/competition/legacy-388/main.py 存在" "test -f docs/competition/legacy-388/main.py"
 echo
 
+echo "--- hooks ---"
+# PLAN.md 仕様の 8 hooks 全部が executable であることを git mode で検証。
+# (iter 1 で guard-dangerous-bash.sh の bit 抜け事故が発生したため)
+HOOKS="guard-dangerous-bash kaggle-quota-guard auto-lint-fmt record-submission analyze-deviations auto-commit-safe trigger-next-iteration load-state"
+for h in $HOOKS; do
+  path=".claude/hooks/${h}.sh"
+  check "${h}.sh 存在" "test -f $path"
+  check "${h}.sh disk exec bit" "test -x $path"
+  check "${h}.sh git mode 100755" "test \"\$(git ls-files -s $path | awk '{print \$1}')\" = '100755'"
+done
+echo
+
 echo "--- legacy-388 動作確認 (optional, skip on failure) ---"
 if python3 -c 'import kaggle_environments' >/dev/null 2>&1; then
   if python3 -c "

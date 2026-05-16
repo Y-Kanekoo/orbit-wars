@@ -49,6 +49,22 @@
 - 同一ファイル並行編集禁止 (主軸 main、各 worktree は独立 branch)
 - ローカル self-play は CPU を埋め尽くさない (max workers = nproc / 2)
 
+## Intent: supervisor と autonomous loop の working tree 分離 (iter 1 教訓)
+目的: 監視/メタ作業を行う human supervisor が autonomous tmux claude と同じ
+working dir を共有しないようにする
+背景: 2026-05-16 iter 1 で、supervisor が `git checkout -b fix/...` した
+瞬間に autonomous claude も同じ working dir のため意図しないブランチを
+見る状態になり、後続作業に混乱を招いた
+制約:
+- autonomous loop は `~/Projects/orbit-wars/` を占有 (tmux session "orbit-wars" 専用)
+- supervisor (人間 + 別 claude セッション) は **必ず別 worktree** で作業
+  - 標準パス: `~/Projects/orbit-wars-watch/` (branch `supervisor/observe`)
+  - 作成は `bash scripts/orchestrator/setup_supervisor_worktree.sh` で
+- supervisor からの fix PR は supervisor worktree 上で作成 → main に merge
+- autonomous loop は main の更新を git pull で自動取り込み
+成功指標: 同一 working tree で human と autonomous loop が同時に branch
+を切り替える事故ゼロ
+
 ## 言語・コミット
 - 日本語回答、コメント日本語、変数・関数名英語
 - コミット形式: `[type] 要約` (feat/fix/refactor/docs/test/chore/ops/exp)
