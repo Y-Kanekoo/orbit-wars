@@ -1,10 +1,17 @@
 {
-  "version": 0,
+  "schema_version": 1,
+  "version": "v0",
   "lb_score": 388.6,
-  "local_winrate": null,
+  "lb_score_sigma": null,
+  "played_episodes": null,
+  "local_winrate_vs_random": null,
+  "local_winrate_vs_nearest_sniper": null,
+  "local_winrate_vs_prev_best": null,
   "submission_id": 52032932,
-  "branch": null,
-  "merged_at": "2026-04-25",
+  "branch": "main",
+  "merged_at": "2026-04-25T13:19:25Z",
+  "agent_file": "main.py",
+  "agent_sha": null,
   "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16)",
-  "notes": "新規実装着手前の参考スコア。新規 agent の初提出時に上書き予定。"
+  "notes": "新規実装着手前の参考スコア。新規 agent 初提出時に上書き予定。"
 }
