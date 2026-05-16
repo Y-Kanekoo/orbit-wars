@@ -54,3 +54,14 @@ dist/
 # Local scratch
 scratch/
 *.local.md
+
+# Claude internal worktrees (per-subtask、git worktree add で claude が自動生成)
+.claude/worktrees/
+
+# Orchestrator runtime
+state/iteration_cooldown
+logs/
+
+# Reports (生成物、commit しない)
+reports/
+*.daily.md
