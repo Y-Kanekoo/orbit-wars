@@ -17,8 +17,17 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 2
 fi
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "[tmux_launcher] claude CLI 未 install。" >&2
+# Claude Code CLI を優先 (~/.local/bin/claude)。/Applications/cmux.app 等の
+# GUI ラッパーを誤って起動しないよう明示的に解決する。
+CLAUDE_BIN=""
+for cand in "$HOME/.local/bin/claude" "/opt/homebrew/bin/claude" "/usr/local/bin/claude"; do
+  if [ -x "$cand" ]; then
+    CLAUDE_BIN="$cand"
+    break
+  fi
+done
+if [ -z "$CLAUDE_BIN" ]; then
+  echo "[tmux_launcher] claude CLI 未 install (~/.local/bin/claude にネイティブインストーラ推奨)。" >&2
   exit 3
 fi
 
@@ -48,10 +57,12 @@ PROMPT='あなたは Orbit Wars 自律エージェントの orchestrator。
 - 同一エラー 3 回 → learned_rules 昇格、6 回 → TODO(autonomous) で skip'
 
 cd "$REPO_ROOT"
-
-tmux new-session -d -s "$SESSION" -n main "claude -p '$PROMPT' --worktree 2>&1 | tee logs/tmux_$(date -u +%Y%m%d_%H%M%S).log"
-
 mkdir -p logs
+
+LOGFILE="logs/tmux_$(date -u +%Y%m%d_%H%M%S).log"
+tmux new-session -d -s "$SESSION" -n main "'$CLAUDE_BIN' -p '$PROMPT' --worktree 2>&1 | tee '$LOGFILE'"
+echo "[tmux_launcher] claude bin: $CLAUDE_BIN"
+echo "[tmux_launcher] log: $LOGFILE"
 
 sleep 2
 if tmux has-session -t "$SESSION" 2>/dev/null; then
