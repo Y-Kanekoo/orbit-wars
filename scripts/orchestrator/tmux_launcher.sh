@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# tmux で claude -p --worktree を常駐起動する (PLAN.md L226)。
-# 既に session があれば warning だけ、無ければ新規 detach 起動。
+# tmux で claude をインタラクティブ起動する。
+# 設計理由: claude -p (--print) は print-and-exit のため trigger-next-iteration
+# hook の send-keys が機能しない。インタラクティブ session に対し send-keys
+# で次イテレーション prompt を送る方式に変更。
 #
 # 使い方:
-#   bash scripts/orchestrator/tmux_launcher.sh           # 起動
+#   bash scripts/orchestrator/tmux_launcher.sh           # 起動 (初回 prompt 送信付き)
 #   tmux attach -t orbit-wars                            # 進行確認
 #   tmux kill-session -t orbit-wars                      # 停止
 
@@ -38,37 +40,68 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   exit 0
 fi
 
-PROMPT='あなたは Orbit Wars 自律エージェントの orchestrator。
+# 初回 orchestrator prompt。1 iteration を完走させる指示。
+# Stop hook (trigger-next-iteration) が次イテレーションを send-keys する。
+INIT_PROMPT='あなたは Orbit Wars 自律エージェントの orchestrator です。以下を順に実行してください。
 
-開始時:
-1. docs/PLAN.md を読み、現在の Phase を把握 (state/best_score.json の lb_score から判定)
-2. state/hypotheses.md の active priority 上位を確認
-3. state/learned_rules.md の AVOID を遵守
+ステップ 1: 状態把握
+- docs/PLAN.md を読み、Phase 0-5 の構成を把握
+- state/best_score.json で現 LB (388.6) と Phase を確認
+- state/hypotheses.md で active 仮説の priority 上位 3 件を確認
+- state/learned_rules.md の AVOID を確認
 
-各イテレーション:
-- bash scripts/orchestrator/run_iteration.sh を実行 (まだ無ければ実装する)
-- 1 iteration 終了で Stop hook trigger-next-iteration.sh が次を kick する
-- quota 枯渇 (kaggle-quota-guard 発火) 時は state/quota.json の date が変わるまで wait
+ステップ 2: 1 イテレーション実行
+- priority 最高の active hypothesis を 1 件選択
+- exp/<NNN>-<slug> ブランチを切る
+- PLAN.md の該当 Phase 仕様に沿って実装 (src/ 配下を編集)
+- pytest -q tests/ で既存 22 件が pass し続けることを確認
+- python -m pytest で新 hypothesis 用 test も追加可能
+- ローカル self-play (python scripts/selfplay/tournament.py --agent1 main.py --agent2 docs/competition/legacy-388/main.py --n 30) で勝率測定
+- winrate >= 55% なら kaggle submit (bash scripts/kaggle/submit.sh main.py "exp NNN <hypothesis>")
+- winrate < 55% なら ledger 記録のみで discard
 
-安全境界:
-- main 直 push 禁止、必ず exp/<NNN>-<slug> ブランチ → PR → CodeRabbit + CI gate → squash merge
+ステップ 3: PR 作成と merge 判定
+- gh pr create で PR (CI/CodeRabbit gate)
+- PR pass + LB gain >= +20 なら main に squash merge し state/best_score.json 更新
+- discard なら branch を残置 (Phase 4 ensemble pool 候補として)
+
+ステップ 4: ledger 更新と終了
+- experiments/ledger.jsonl に 1 行 append
+- 状態を簡潔に報告して停止 (Stop hook が次イテレーションを kick する)
+
+安全境界 (絶対):
+- main 直 push 禁止 (settings.json deny rule に頼らず自主規制)
 - テストファイル改変禁止
 - --no-verify 禁止
-- 同一エラー 3 回 → learned_rules 昇格、6 回 → TODO(autonomous) で skip'
+- 同一エラー 3 回 → 異 approach、6 回 → state/hypotheses.md で status を stuck に変更
+- Kaggle quota は state/quota.json を必ず参照、5/日上限を遵守
+- 1 秒/turn 制約: src/utils/timing.py の deadline_iter を必ず使う
+
+開始してください。'
 
 cd "$REPO_ROOT"
 mkdir -p logs
 
 LOGFILE="logs/tmux_$(date -u +%Y%m%d_%H%M%S).log"
-tmux new-session -d -s "$SESSION" -n main "'$CLAUDE_BIN' -p '$PROMPT' --worktree 2>&1 | tee '$LOGFILE'"
+
+# インタラクティブ claude を tmux で起動。stdout/stderr は tmux pane に出る (capture-pane で確認可)。
+# pipe-pane で外部ログ取得も別途可能だが、初期は pane capture のみ。
+tmux new-session -d -s "$SESSION" -n main "cd '$REPO_ROOT' && '$CLAUDE_BIN'"
+
 echo "[tmux_launcher] claude bin: $CLAUDE_BIN"
-echo "[tmux_launcher] log: $LOGFILE"
+echo "[tmux_launcher] log path planned: $LOGFILE (pane の出力は tmux capture-pane で取得)"
+
+# claude が起動して prompt 入力受付になるのを待つ (10-15s)
+sleep 12
+
+# 初回 prompt を送信
+tmux send-keys -t "$SESSION" "$INIT_PROMPT" Enter
 
 sleep 2
 if tmux has-session -t "$SESSION" 2>/dev/null; then
-  echo "[tmux_launcher] OK: session '$SESSION' 起動済"
+  echo "[tmux_launcher] OK: session '$SESSION' 起動済 + 初回 prompt 送信済"
   echo "  attach: tmux attach -t $SESSION"
-  echo "  status: tmux capture-pane -p -t $SESSION | tail -20"
+  echo "  status: tmux capture-pane -p -t $SESSION | tail -50"
   echo "  kill:   tmux kill-session -t $SESSION"
 else
   echo "[tmux_launcher] FAIL: session が立ち上がりませんでした" >&2
