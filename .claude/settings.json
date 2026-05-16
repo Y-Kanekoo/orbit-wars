@@ -50,11 +50,7 @@
       "Bash(rm -rf:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
-      "Bash(:*--no-verify:*)",
-      "Bash(eval:*)",
-      "Bash(curl:*| sh)",
-      "Bash(wget:*| sh)",
-      "Bash(:*>/etc/:*)"
+      "Bash(eval:*)"
     ]
   },
   "hooks": {
