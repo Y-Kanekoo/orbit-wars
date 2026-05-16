@@ -87,7 +87,9 @@ def test_sanitize_hammer_random() -> None:
         planets = []
         for i in range(n):
             owner = rng.choice([-1, 0, 1, 2, 3])
-            planets.append([i, owner, rng.uniform(0, 100), rng.uniform(0, 100), 1.0, rng.randint(0, 50), 1])
+            planets.append(
+                [i, owner, rng.uniform(0, 100), rng.uniform(0, 100), 1.0, rng.randint(0, 50), 1]
+            )
         obs = _mk_obs(0, planets)
 
         moves = []
