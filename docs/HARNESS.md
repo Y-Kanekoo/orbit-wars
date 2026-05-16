@@ -98,6 +98,20 @@ tmux capture-pane -p -t orbit-wars | tail -50 # ログ snapshot
 tmux kill-session -t orbit-wars               # 停止
 ```
 
+### Supervisor (監視/メタ作業) は必ず別 worktree (iter 1 教訓)
+autonomous tmux claude が `~/Projects/orbit-wars/` を占有する間、human supervisor (or 別 claude session) が同じ working tree で `git checkout` 等を行うと autonomous claude も巻き込まれて state 混乱が起きる。supervisor は **必ず別 worktree** で作業すること。
+
+```bash
+# 初回のみ (or 既存なら noop)
+bash scripts/orchestrator/setup_supervisor_worktree.sh
+
+# 以降の supervisor 作業はここで
+cd ~/Projects/orbit-wars-watch
+# fix PR / docs 更新 / state 監視等
+```
+
+`~/Projects/orbit-wars/` は autonomous loop 専用、`~/Projects/orbit-wars-watch/` は supervisor 専用。
+
 ### 中断復旧
 ```bash
 bash scripts/orchestrator/resume.sh    # ledger 整理 + tmux 状況確認
@@ -132,3 +146,6 @@ bash scripts/orchestrator/tmux_launcher.sh   # 再起動
 | submit が hook で block | `cat state/quota.json` で残数確認、`date` が当日に更新されていないか |
 | 連続エラーで loop 停止 | `cat state/learned_rules.md` で AVOID 確認、追加 hypothesis を researcher で投入 |
 | LB が伸びない (連続 5 iter gain≤0) | strategy pivot 通知発火、researcher 強制起動 (A-20) |
+| tmux pane が空のまま動かない | `which claude` で `/Applications/cmux.app/...` (GUI) が解決されてないか確認、tmux_launcher.sh は `~/.local/bin/claude` (CLI) を明示解決済 |
+| hook で `Permission denied` 連発 | `git ls-files -s .claude/hooks/` で全 hook が `100755` か確認 (iter 1 で guard-dangerous-bash.sh が 100644 のまま merge 事故あり)。smoke.sh が今は検証する |
+| supervisor が branch を切ったら autonomous claude が混乱 | supervisor は `~/Projects/orbit-wars-watch/` 別 worktree で作業 (`setup_supervisor_worktree.sh` で作成)、main repo dir を直接触らない |
