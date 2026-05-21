@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from src.strategy.geometry import distance, fleet_speed
@@ -49,4 +50,41 @@ def incoming_threat(
             continue
         if turns_to_reach(f, defender_x, defender_y) <= horizon_turns:
             total += f.ships
+    return total
+
+
+def incoming_threat_eta(
+    defender_x: float,
+    defender_y: float,
+    my_player: int,
+    enemy_fleets: list[FleetView],
+    horizon_turns: int = 20,
+) -> float:
+    """方向考慮 threat (H003)。
+
+    `incoming_threat` は直線距離のみで判定するため、planet から離れていく敵 fleet も
+    脅威に数える欠陥がある。本関数は fleet の進行方向 (angle) と planet 方向の cos を取り、
+    向かってくる成分のみを脅威として ships に重み付けする。
+
+    - align = cos(heading_error): 進行方向が planet を向くほど 1 に近い。<=0 (離反) は除外。
+    - eta = (距離 × align) / speed: 進行方向に沿った最接近までの turn 数。horizon 超過は除外。
+    - 戻り値 = Σ ships × align (向かってくる敵 fleet のみ)。
+    """
+    total = 0.0
+    for f in enemy_fleets:
+        if f.owner == my_player or f.owner < 0:
+            continue
+        dx = defender_x - f.x
+        dy = defender_y - f.y
+        d = math.hypot(dx, dy)
+        if d < 1e-6:
+            total += float(f.ships)
+            continue
+        align = (math.cos(f.angle) * dx + math.sin(f.angle) * dy) / d
+        if align <= 0.0:
+            continue
+        eta = (d * align) / max(fleet_speed(f.ships), 1e-6)
+        if eta > horizon_turns:
+            continue
+        total += float(f.ships) * align
     return total
