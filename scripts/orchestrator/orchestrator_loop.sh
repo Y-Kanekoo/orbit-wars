@@ -39,7 +39,9 @@ if [[ "$REPO_ROOT" == *orbit-wars-watch* ]]; then
 fi
 
 # 旧 tmux session との二重起動を防ぐ。
-if command -v tmux >/dev/null 2>&1 && tmux has-session -t orbit-wars 2>/dev/null; then
+# tmux has-session -t は prefix match するため (orbit-wars が orbit-wars-ci に誤マッチ)、
+# session 名の完全一致を grep -qx で判定する。
+if command -v tmux >/dev/null 2>&1 && tmux ls -F '#{session_name}' 2>/dev/null | grep -qx orbit-wars; then
   echo "[loop] ERROR: tmux session 'orbit-wars' が走行中。二重起動を防ぐため停止します。" >&2
   echo "[loop] 旧 loop を止めてから起動してください: tmux kill-session -t orbit-wars" >&2
   exit 6
