@@ -14,7 +14,7 @@ from src.features.projection import IncomingFleet, project_ships, projected_tota
 from src.features.territory import territory_share
 from src.strategy.geometry import angle_to, avoidance_angle, distance, fleet_speed
 from src.strategy.targeting import PlanetView, pick_best_target, score_target
-from src.strategy.threat import FleetView, incoming_threat, incoming_threat_eta
+from src.strategy.threat import FleetView, incoming_threat
 
 SEARCH_DEPTH = 2
 BEAM_WIDTH = 16
@@ -30,12 +30,6 @@ TERRITORY_SCALE = 100.0  # territory_share (0..1) を _score_state スケール�
 # production 二重カウントで over-expansion → prev_best regression。default off で再定式化 (H022) 待ち
 PROJECTION_WEIGHT = 0.0
 PROJECTION_HORIZON = 30  # projection の先読み turn 数
-# H003: eval の threat 減算項の係数。旧実装は direction-blind incoming_threat * 1.5。
-# 本実装は方向考慮 incoming_threat_eta * THREAT_EVAL_WEIGHT (離れていく fleet を除外)。
-# 方向フィルタで threat 平均が旧比 0.608 倍に減るため、旧ペナルティ magnitude を保つ
-# magnitude-matched 係数 1.5/0.608≈2.5 を採用 (係数 0.7 では argmax が 4/214 しか変わらず弱すぎた)。
-THREAT_EVAL_WEIGHT = 2.5
-THREAT_EVAL_HORIZON = 20
 
 
 @dataclass(slots=True)
@@ -405,10 +399,8 @@ def _score_state(state: SearchState, player: int) -> float:
             if targets:
                 roi = max(score_target(planet.as_view(), target, player) for target in targets)
                 total += max(0.0, roi)
-            threat = incoming_threat_eta(
-                planet.x, planet.y, player, fleet_views, horizon_turns=THREAT_EVAL_HORIZON
-            )
-            total -= threat * THREAT_EVAL_WEIGHT
+            threat = incoming_threat(planet.x, planet.y, player, fleet_views, horizon_turns=20)
+            total -= float(threat) * 1.5
 
     for fleet in state.fleets:
         if fleet.owner == player:

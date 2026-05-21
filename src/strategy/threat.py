@@ -69,6 +69,11 @@ def incoming_threat_eta(
     - align = cos(heading_error): 進行方向が planet を向くほど 1 に近い。<=0 (離反) は除外。
     - eta = (距離 × align) / speed: 進行方向に沿った最接近までの turn 数。horizon 超過は除外。
     - 戻り値 = Σ ships × align (向かってくる敵 fleet のみ)。
+
+    NOTE (discard): exp/003 で eval に weight 2.5 で統合 (`incoming_threat * 1.5` 置換) したが、
+    mix-eval gate で強い相手に regression し discard (ledger exp/003 参照)。本関数は eval 未統合の
+    休眠 infra として残置。再定式化 (別 weight / baseline incoming_threat との併用) は H007 grid
+    search 対象。
     """
     total = 0.0
     for f in enemy_fleets:

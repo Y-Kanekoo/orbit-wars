@@ -36,3 +36,7 @@
   - 検出契機: exp/002 projection (H002)。PROJECTION_WEIGHT 0.3/0.1 で mix-eval すると random は改善 (0.93-0.97) するが nearest_sniper 0.5333 / prev_best 0.3667 に regression、winrate_min 0.3667 で gate fail。
   - 重要: projection_total は全 own planet への**スカラー一律加算**のため、係数を変えても beam の argmax (選ぶ action 列) が同一になり **sweep が無効化**される (0.3 と 0.1 で prev_best が完全同一 11/30)。係数を下げても救えない項は方向そのものが誤り。
   - 防止策: 新 eval 項は既存項と**方向が異なる別軸** (territory=空間支配 / threat=守備減算 / sun blocking) を選ぶ。production 系の項を足す場合は二重カウントにならない定式化 (最弱 planet の projection、threat 込み差分等) にする。
+- INFO: `new_eval_term_helps_random_hurts_strong` — 新規 eval 補助項は random (弱い相手) で winrate を上げつつ nearest_sniper / legacy-388 (強い相手) で regression する傾向が強い。**単独の random 改善は効果の証拠にならない**。go/no-go は gate の `winrate_min` と `prev_best` (強い相手) で判定すること。
+  - 検出契機: 3 例連続で同パターン。exp/002 territory (LB -17.3)、exp/002proj projection (random 0.93-0.97↑ / sniper 0.5333↓ / prev_best 0.3667↓)、exp/003 threat-eta (random 0.8667→0.9667↑ / sniper 0.5667→0.5333↓ / prev_best 0.5667→0.4667↓、winrate_min 0.4667 で gate fail)。
+  - 解釈: random は弱いので攻撃寄り/雑な eval でも勝てるが、強い相手は守備の隙や over-expansion を突く。random winrate は天井 (>0.90) に張り付きやすく識別力が低い。
+  - 防止策: hypothesis の go 条件に random を含めない (no-regression の下限のみ)。改善を主張する相手は必ず prev_best / nearest_sniper にする。新 eval 項は強い相手で測ってから採否を決める。
