@@ -1,4 +1,8 @@
-"""H021 mix-eval submit gate のテスト (check_mix_gate.py)。"""
+"""H021 mix-eval submit gate のテスト (check_mix_gate.py, no-regression 方式)。
+
+baseline は --baseline-json で明示的に渡し、repo state 非依存にする。
+baseline 値: random 0.8667 / nearest_sniper 0.5667 / prev_best 0.5667 (現 main parity)。
+"""
 
 from __future__ import annotations
 
@@ -11,9 +15,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GATE = ROOT / "scripts/kaggle/check_mix_gate.py"
 
+BASE_RANDOM = 0.8667
+BASE_SNIPER = 0.5667
+BASE_PREV = 0.5667
+
 
 def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _write_baseline(tmp_path: Path) -> Path:
+    best = {
+        "schema_version": 2,
+        "mix_eval": {
+            "opponents": {
+                "random": {"winrate": BASE_RANDOM},
+                "nearest_sniper": {"winrate": BASE_SNIPER},
+                "prev_best": {"winrate": BASE_PREV},
+            }
+        },
+    }
+    p = tmp_path / "baseline.json"
+    p.write_text(json.dumps(best))
+    return p
 
 
 def _write_mix(
@@ -42,9 +66,16 @@ def _write_mix(
     return p
 
 
-def _run_gate(mix_path: Path, *extra: str) -> int:
+def _run_gate(mix_path: Path, baseline_path: Path, *extra: str) -> int:
     r = subprocess.run(
-        [sys.executable, str(GATE), str(mix_path), *extra],
+        [
+            sys.executable,
+            str(GATE),
+            str(mix_path),
+            "--baseline-json",
+            str(baseline_path),
+            *extra,
+        ],
         capture_output=True,
         text=True,
     )
@@ -52,97 +83,134 @@ def _run_gate(mix_path: Path, *extra: str) -> int:
 
 
 def test_gate_pass(tmp_path: Path) -> None:
-    # prev_best 0.70 は repo の prev baseline (~0.53) + 0.05 を確実に超える
+    base = _write_baseline(tmp_path)
+    # 全相手 baseline 以上、prev_best は +0.05 超 (0.6167)
     mix = _write_mix(
         tmp_path,
-        random_wr=0.95,
-        sniper_wr=0.65,
-        prev_wr=0.70,
-        winrate_min=0.65,
+        random_wr=0.90,
+        sniper_wr=0.60,
+        prev_wr=0.65,
+        winrate_min=0.60,
         errors_total=0,
     )
-    assert _run_gate(mix) == 0
+    assert _run_gate(mix, base) == 0
 
 
-def test_gate_fail_low_random(tmp_path: Path) -> None:
+def test_gate_pass_exactly_baseline_random(tmp_path: Path) -> None:
+    # random が baseline ちょうど (no-regression は >= なので pass)
+    base = _write_baseline(tmp_path)
     mix = _write_mix(
         tmp_path,
-        random_wr=0.85,  # < 0.90
-        sniper_wr=0.65,
-        prev_wr=0.70,
-        winrate_min=0.65,
+        random_wr=BASE_RANDOM,
+        sniper_wr=0.60,
+        prev_wr=0.65,
+        winrate_min=BASE_RANDOM,
         errors_total=0,
     )
-    assert _run_gate(mix) == 1
+    assert _run_gate(mix, base) == 0
 
 
-def test_gate_fail_low_sniper(tmp_path: Path) -> None:
+def test_gate_fail_random_regression(tmp_path: Path) -> None:
+    base = _write_baseline(tmp_path)
     mix = _write_mix(
         tmp_path,
-        random_wr=0.95,
-        sniper_wr=0.55,  # < 0.60
-        prev_wr=0.70,
+        random_wr=0.85,  # < baseline 0.8667
+        sniper_wr=0.60,
+        prev_wr=0.65,
+        winrate_min=0.60,
+        errors_total=0,
+    )
+    assert _run_gate(mix, base) == 1
+
+
+def test_gate_fail_sniper_regression(tmp_path: Path) -> None:
+    base = _write_baseline(tmp_path)
+    mix = _write_mix(
+        tmp_path,
+        random_wr=0.90,
+        sniper_wr=0.55,  # < baseline 0.5667
+        prev_wr=0.65,
         winrate_min=0.55,
         errors_total=0,
     )
-    assert _run_gate(mix) == 1
+    assert _run_gate(mix, base) == 1
 
 
 def test_gate_fail_winrate_min(tmp_path: Path) -> None:
+    base = _write_baseline(tmp_path)
     mix = _write_mix(
         tmp_path,
-        random_wr=0.95,
-        sniper_wr=0.65,
-        prev_wr=0.70,
+        random_wr=0.90,
+        sniper_wr=0.60,
+        prev_wr=0.65,
         winrate_min=0.45,  # < 0.50
         errors_total=0,
     )
-    assert _run_gate(mix) == 1
+    assert _run_gate(mix, base) == 1
 
 
 def test_gate_fail_errors(tmp_path: Path) -> None:
+    base = _write_baseline(tmp_path)
     mix = _write_mix(
         tmp_path,
-        random_wr=0.95,
-        sniper_wr=0.65,
-        prev_wr=0.70,
-        winrate_min=0.65,
+        random_wr=0.90,
+        sniper_wr=0.60,
+        prev_wr=0.65,
+        winrate_min=0.60,
         errors_total=2,  # != 0
     )
-    assert _run_gate(mix) == 1
+    assert _run_gate(mix, base) == 1
 
 
 def test_gate_fail_prev_no_improvement(tmp_path: Path) -> None:
-    # prev_best 0.50 は repo baseline (~0.53) + 0.05 を超えない
+    base = _write_baseline(tmp_path)
+    # prev 0.60 は baseline 0.5667 + 0.05 = 0.6167 を超えない
     mix = _write_mix(
         tmp_path,
-        random_wr=0.95,
-        sniper_wr=0.65,
-        prev_wr=0.50,
-        winrate_min=0.50,
+        random_wr=0.90,
+        sniper_wr=0.60,
+        prev_wr=0.60,
+        winrate_min=0.60,
         errors_total=0,
     )
-    assert _run_gate(mix) == 1
+    assert _run_gate(mix, base) == 1
 
 
 def test_gate_stale(tmp_path: Path) -> None:
+    base = _write_baseline(tmp_path)
     old = (datetime.now(UTC) - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
     mix = _write_mix(
         tmp_path,
-        random_wr=0.95,
-        sniper_wr=0.65,
-        prev_wr=0.70,
-        winrate_min=0.65,
+        random_wr=0.90,
+        sniper_wr=0.60,
+        prev_wr=0.65,
+        winrate_min=0.60,
         errors_total=0,
         measured_at=old,
     )
-    # stale check 無効ならpass、 有効 (max-age 1h) なら block
-    assert _run_gate(mix) == 0
-    assert _run_gate(mix, "--max-age-sec", "3600") == 1
+    assert _run_gate(mix, base) == 0  # stale check 無効
+    assert _run_gate(mix, base, "--max-age-sec", "3600") == 1  # stale block
 
 
 def test_gate_missing_file(tmp_path: Path) -> None:
-    assert _run_gate(tmp_path / "nonexistent.json") == 1
+    base = _write_baseline(tmp_path)
+    assert _run_gate(tmp_path / "nonexistent.json", base) == 1
+
+
+def test_baseline_fallback_when_no_mix_eval(tmp_path: Path) -> None:
+    """baseline json に mix_eval が無い場合は FALLBACK_BASELINE (random>=0.90) を使う。"""
+    base = tmp_path / "best_v1.json"
+    base.write_text(json.dumps({"schema_version": 1, "local_winrate_vs_prev_best": 0.50}))
+    # random 0.88 は fallback baseline 0.90 を下回る → fail
+    mix = _write_mix(
+        tmp_path,
+        random_wr=0.88,
+        sniper_wr=0.65,
+        prev_wr=0.60,
+        winrate_min=0.60,
+        errors_total=0,
+    )
+    assert _run_gate(mix, base) == 1
 
 
 def test_opponent_map_paths_exist() -> None:
