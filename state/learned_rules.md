@@ -27,3 +27,7 @@
   - 検出契機: 2026-05-17 supervisor 調査で kaggle_environments/agent.py 読解 + main.py / main_bare.py を実 exec して `NameError: name '__file__' is not defined` を再現、修正後 main.py vs legacy-388 N=5 で winrate 0.167 → 0.40 (parity 期待値レンジ)。
   - 防止策: agent module top-level で `try: _ROOT = Path(__file__).resolve().parent; except NameError: pass` の guard を必ず入れる。kaggle agent loader は exec_dir を sys.path に append 済 (agent.py L53) なので fallback で何もしないで OK。
   - 関連: legacy-388 は `try: from .search.beam ...; except (ImportError, KeyError): ...` の構造で同じ問題 (`__name__` not in globals での relative import 失敗) を回避していた。今回の 修正で main.py + main_bare.py を同等以上に robust 化。
+- INFO: `single_opponent_winrate_not_lb_predictive` — 単一相手 (legacy-388 のみ) のローカル N=30 winrate は LB を予測しない。exp 002 (H001 territory `TERRITORY_WEIGHT=0.3`) が両 seat 平均 63.3% (p1=73.3%, swap=53.3%) でも LB publicScore は baseline 比 **-17.3** (410.7→393.4) で discard。LB は random / nearest_sniper / 他参加者 submission の **mix 分布** に対する性能を測るため、単一相手では盲点が埋もれる。
+  - 検出契機: 2026-05-21 supervisor が exp 002 の Kaggle 提出 (id 52716957) の publicScore を確認、ローカル高 winrate と LB regression の乖離を発見。
+  - 防止策: submit gate を mix-eval (H021) に格上げ。`winrate_random≥0.90 AND winrate_sniper≥0.60 AND winrate_prev_best≥(prev+0.05) AND winrate_min≥0.50 AND errors_total=0` の全条件を満たさないと submit しない。特に `winrate_min≥0.50` で「どの相手にも負け越さない」を保証。
+  - 関連: LB score は時間変動する (episode 蓄積で再計算: 52716957 は 360.9→393.4、52032932 は 383.5→410.7)。go/no-go 判定は提出直後でなく **24-48h 後の安定 score** で行う。
