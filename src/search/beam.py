@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.features.projection import IncomingFleet, project_ships, projected_total
 from src.features.territory import territory_share
 from src.strategy.geometry import angle_to, avoidance_angle, distance, fleet_speed
 from src.strategy.targeting import PlanetView, pick_best_target, score_target
@@ -25,6 +26,8 @@ TERRITORY_WEIGHT = (
     0.0  # H001 default off (H000 parity 修復前は無効化、territory 計算自体も `if` で短絡)
 )
 TERRITORY_SCALE = 100.0  # territory_share (0..1) を _score_state スケールに揃える
+PROJECTION_WEIGHT = 0.3  # H002: 30 turn ship 在庫 projection 係数 (0.3-0.8 sweep 起点)
+PROJECTION_HORIZON = 30  # projection の先読み turn 数
 
 
 @dataclass(slots=True)
@@ -359,6 +362,28 @@ def _territory_term(state: SearchState, player: int) -> float:
     return (own_share - other_share) * TERRITORY_SCALE
 
 
+def _projection_term(state: SearchState, player: int) -> float:
+    """H002: 30 turn 先の自軍 ship 在庫 projection 合計。
+
+    production 積み + incoming fleet 加減算 (target が own planet のもののみ反映、
+    raw obs 由来の target=-1 fleet は projection 側で自然に skip される)。
+    """
+    own_planets = [(p.id, p.production) for p in state.planets if p.owner == player]
+    if not own_planets:
+        return 0.0
+    incoming = [
+        IncomingFleet(
+            target_planet_id=f.target_planet_id,
+            arrival_turn=f.turns_remaining,
+            owner=f.owner,
+            ships=f.ships,
+        )
+        for f in state.fleets
+    ]
+    proj = project_ships(own_planets, incoming, player, n_turns=PROJECTION_HORIZON)
+    return float(projected_total(proj))
+
+
 def _score_state(state: SearchState, player: int) -> float:
     fleet_views = _fleet_views(state)
     planet_views = [planet.as_view() for planet in state.planets]
@@ -383,6 +408,8 @@ def _score_state(state: SearchState, player: int) -> float:
 
     if TERRITORY_WEIGHT > 0.0:
         total += TERRITORY_WEIGHT * _territory_term(state, player)
+    if PROJECTION_WEIGHT > 0.0:
+        total += PROJECTION_WEIGHT * _projection_term(state, player)
     return total
 
 
