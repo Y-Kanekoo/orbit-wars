@@ -22,12 +22,25 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# step 0: mix-eval submit gate (H021)。dry-run では skip (時間節約)。
+# gate fail なら submit を中止 (LB regression 防止、exp 002 教訓)。
+if [ -z "$DRY" ]; then
+  echo "[submit] step 0: mix-eval submit gate"
+  if ! bash scripts/kaggle/mix_eval_gate.sh "$AGENT"; then
+    echo "[submit] BLOCK: mix-eval gate fail。submit を中止します。" >&2
+    exit 1
+  fi
+fi
+
 echo "[submit] step 1: verify_submission"
 bash scripts/kaggle/verify_submission.sh "$AGENT"
 
 echo "[submit] step 2: pack submission.tar.gz"
-PACK=$(mktemp -t orbit-wars-pack-XXXX.tar.gz)
-trap 'rm -f "$PACK"' EXIT
+# macOS BSD mktemp は -t template 末尾にランダム suffix を追加するため、
+# .tar.gz 拡張子を確実に保つには dir を作ってからファイル名を固定する
+TMPPACKDIR=$(mktemp -d -t orbit-wars-pack-XXXX)
+PACK="$TMPPACKDIR/submission.tar.gz"
+trap 'rm -rf "$TMPPACKDIR"' EXIT
 
 # main.py が src/ を import するか判定
 if grep -qE 'from[[:space:]]+src\.' "$AGENT" || grep -qE 'import[[:space:]]+src\.' "$AGENT"; then

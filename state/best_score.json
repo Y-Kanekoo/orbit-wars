@@ -1,19 +1,31 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "version": "v0",
   "lb_score": 410.7,
   "lb_score_sigma": null,
   "played_episodes": null,
-  "local_winrate_vs_random": null,
-  "local_winrate_vs_nearest_sniper": null,
-  "local_winrate_vs_prev_best": 0.5333,
+  "local_winrate_vs_random": 0.8667,
+  "local_winrate_vs_nearest_sniper": 0.5667,
+  "local_winrate_vs_prev_best": 0.5667,
   "local_winrate_vs_prev_best_n": 30,
-  "local_winrate_vs_prev_best_measured_at": "2026-05-17T01:30:00Z",
+  "local_winrate_vs_prev_best_measured_at": "2026-05-21T13:56:42Z",
+  "mix_eval": {
+    "agent": "main.py (parity baseline, TERRITORY_WEIGHT=0.0)",
+    "n_per_opponent": 30,
+    "opponents": {
+      "random": {"winrate": 0.8667, "wins": 26, "n": 30, "errors": 0},
+      "nearest_sniper": {"winrate": 0.5667, "wins": 17, "n": 30, "errors": 0},
+      "prev_best": {"winrate": 0.5667, "wins": 17, "n": 30, "errors": 0}
+    },
+    "winrate_min": 0.5667,
+    "errors_total": 0,
+    "measured_at": "2026-05-21T13:56:42Z"
+  },
   "submission_id": 52032932,
   "branch": "main",
   "merged_at": "2026-04-25T13:19:25Z",
   "agent_file": "main.py",
   "agent_sha": null,
   "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16) + parity fix (PR #37)",
-  "notes": "PARITY 確定: 移植 beam (main.py) vs legacy-388 N=30 winrate 0.5333 (16-14, errors=0)。lb_score を 388.6→410.7 に更新 (submission 52032932 が episode 蓄積で再計算、2026-05-21 確認)。exp 002 (H001 territory) は LB regression -17.3 で discarded。次イテレーションは H021 mix-eval infra を最優先 (単一相手 winrate が LB を予測しない問題への対策)。"
+  "notes": "PARITY 確定 (LB 410.7, submission 52032932)。H021 mix-eval infra 完了: schema v2 で baseline mix_eval を記録 (random 0.8667 / nearest_sniper 0.5667 / prev_best 0.5667, errors=0)。注意: baseline は random で 0.8667 と gate 閾値 0.90 を下回るため、次の hypothesis は random 性能も改善が必要。次の submit gate は prev_best>=0.6167 (0.5667+0.05)。"
 }

@@ -37,17 +37,21 @@ def run_match(agent1: str, agent2: str, seed: int) -> dict:
     final = env.steps[-1]
     rewards = [float(s.reward) if s.reward is not None else 0.0 for s in final]
     winner = int(max(range(len(rewards)), key=lambda i: rewards[i])) if rewards else -1
+    steps = len(env.steps)
 
-    # 各 agent の最大 act 時間 (kaggle env が記録する場合は state.observation.remainingOverageTime
-    # から逆算可能だが、Phase 0 は近似値として未実装)
+    # no-op crash 検出 (PLAN.md exp 001/002 教訓):
+    # agent が NameError 等で一切呼ばれない場合、対戦が即終了 (steps<50) し
+    # rewards が全 0 になる。これを error 扱いにして mix-eval gate で弾く。
+    crash_suspect = steps < 50 and all(r == 0.0 for r in rewards)
 
     return {
         "seed": seed,
         "agent1": agent1,
         "agent2": agent2,
         "rewards": rewards,
-        "steps": len(env.steps),
+        "steps": steps,
         "winner": winner,
+        "crash_suspect": crash_suspect,
         "elapsed_sec": round(elapsed, 2),
     }
 
