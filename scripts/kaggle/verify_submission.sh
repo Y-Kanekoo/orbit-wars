@@ -43,8 +43,12 @@ fi
 
 cd "$TMP"
 
+# venv python を優先 (kaggle env は numpy 等込みなので .venv が同等の deps を持つ前提)
+PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+[ -x "$PYTHON_BIN" ] || PYTHON_BIN="python3"
+
 # 純粋 python (リポジトリ依存無し) で agent 起動を試す
-python3 - <<'PYEOF'
+"$PYTHON_BIN" - <<'PYEOF'
 import sys
 sys.path.insert(0, ".")
 try:

@@ -58,6 +58,19 @@ if echo "$CMD" | grep -qE 'kaggle[[:space:]]+competitions[[:space:]]+submit\b'; 
       echo "[kaggle-quota-guard] WARN: submission 残 $((LIMIT - COUNT)) 枠" >&2
     fi
   fi
+
+  # H021 mix-eval submit gate の二重化 (stale check 付き)。
+  # submit.sh step 0 が生成する state/last_mix_eval.json を読み、
+  # gate 条件未達 or 古い (>2h) なら block。
+  MIX_FILE="state/last_mix_eval.json"
+  PY="$(pwd)/.venv/bin/python"
+  [ -x "$PY" ] || PY=python3
+  if [ ! -f "$MIX_FILE" ]; then
+    block "mix-eval 未実行 (state/last_mix_eval.json 不在)。scripts/kaggle/mix_eval_gate.sh を先に通すこと"
+  fi
+  if ! "$PY" scripts/kaggle/check_mix_gate.py "$MIX_FILE" --max-age-sec 7200 >&2; then
+    block "mix-eval submit gate 未達 or stale。scripts/kaggle/mix_eval_gate.sh を先に通すこと"
+  fi
 fi
 
 # Notebook (kernel) push 判定
