@@ -26,7 +26,9 @@ TERRITORY_WEIGHT = (
     0.0  # H001 default off (H000 parity 修復前は無効化、territory 計算自体も `if` で短絡)
 )
 TERRITORY_SCALE = 100.0  # territory_share (0..1) を _score_state スケールに揃える
-PROJECTION_WEIGHT = 0.3  # H002: 30 turn ship 在庫 projection 係数 (0.3-0.8 sweep 起点)
+# H002 discard: projection_total はスカラー加算で sweep 無効 (0.3/0.1 で prev_best 完全同一)、
+# production 二重カウントで over-expansion → prev_best regression。default off で再定式化 (H022) 待ち
+PROJECTION_WEIGHT = 0.0
 PROJECTION_HORIZON = 30  # projection の先読み turn 数
 
 

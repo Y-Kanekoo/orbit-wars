@@ -32,3 +32,7 @@
   - 防止策: submit gate を mix-eval (H021) に格上げ。**no-regression 方式**: `winrate_random≥baseline_random AND winrate_sniper≥baseline_sniper AND winrate_prev_best≥baseline_prev_best+0.05 AND winrate_min≥0.50 AND errors_total=0` の全条件を満たさないと submit しない。baseline は best_score.json mix_eval から動的読込 (hardcode 回避)。特に `winrate_min≥0.50` で「どの相手にも負け越さない」を保証。
   - 補足 (exp/021b, supervisor 通知2): 当初の絶対値 gate (random≥0.90, sniper≥0.60) は現 baseline (random 0.8667) すら通らないため no-regression に変更。「baseline から悪化しない + prev_best のみ +0.05 改善」で、submit ごとに単調改善を保証しつつ baseline を不当に弾かない。
   - 関連: LB score は時間変動する (episode 蓄積で再計算: 52716957 は 360.9→393.4、52032932 は 383.5→410.7)。go/no-go 判定は提出直後でなく **24-48h 後の安定 score** で行う。
+- AVOID: `eval_term_redundant_with_production` — production を含む補助 eval 項 (例: 30 turn projection_total) は既存 `production*8` と方向が同じで補完にならず、over-expansion を促して強い相手に regression する。
+  - 検出契機: exp/002 projection (H002)。PROJECTION_WEIGHT 0.3/0.1 で mix-eval すると random は改善 (0.93-0.97) するが nearest_sniper 0.5333 / prev_best 0.3667 に regression、winrate_min 0.3667 で gate fail。
+  - 重要: projection_total は全 own planet への**スカラー一律加算**のため、係数を変えても beam の argmax (選ぶ action 列) が同一になり **sweep が無効化**される (0.3 と 0.1 で prev_best が完全同一 11/30)。係数を下げても救えない項は方向そのものが誤り。
+  - 防止策: 新 eval 項は既存項と**方向が異なる別軸** (territory=空間支配 / threat=守備減算 / sun blocking) を選ぶ。production 系の項を足す場合は二重カウントにならない定式化 (最弱 planet の projection、threat 込み差分等) にする。
