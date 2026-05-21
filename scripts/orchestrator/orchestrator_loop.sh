@@ -27,6 +27,24 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# supervisor worktree (orbit-wars-watch) での誤起動を防ぐ。
+# autonomous loop は autonomous worktree (~/Projects/orbit-wars) 専用。
+# supervisor worktree で回すと supervisor の作業 branch と競合し、AVOID rule
+# supervisor_shared_working_tree に抵触する。
+if [[ "$REPO_ROOT" == *orbit-wars-watch* ]]; then
+  echo "[loop] ERROR: supervisor worktree ($REPO_ROOT) では起動禁止。" >&2
+  echo "[loop] autonomous worktree で起動してください:" >&2
+  echo "[loop]   cd ~/Projects/orbit-wars && bash scripts/orchestrator/orchestrator_loop.sh" >&2
+  exit 5
+fi
+
+# 旧 tmux session との二重起動を防ぐ。
+if command -v tmux >/dev/null 2>&1 && tmux has-session -t orbit-wars 2>/dev/null; then
+  echo "[loop] ERROR: tmux session 'orbit-wars' が走行中。二重起動を防ぐため停止します。" >&2
+  echo "[loop] 旧 loop を止めてから起動してください: tmux kill-session -t orbit-wars" >&2
+  exit 6
+fi
+
 # ---- 設定 (環境変数で上書き可) ----
 MAX_ITERS="${ORBIT_MAX_ITERS:-30}"              # ループ回数上限
 MAX_HOURS="${ORBIT_MAX_HOURS:-12}"              # wall-clock 上限 (時間)
