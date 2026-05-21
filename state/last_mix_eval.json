@@ -1,6 +1,6 @@
 {
   "mode": "mix_eval",
-  "agent": "main.py",
+  "agent": "main.py (parity baseline, TERRITORY_WEIGHT=0.0, PROJECTION_WEIGHT=0.0)",
   "n_per_opponent": 30,
   "opponents": {
     "random": {
