@@ -40,3 +40,8 @@
   - 検出契機: 3 例連続で同パターン。exp/002 territory (LB -17.3)、exp/002proj projection (random 0.93-0.97↑ / sniper 0.5333↓ / prev_best 0.3667↓)、exp/003 threat-eta (random 0.8667→0.9667↑ / sniper 0.5667→0.5333↓ / prev_best 0.5667→0.4667↓、winrate_min 0.4667 で gate fail)。
   - 解釈: random は弱いので攻撃寄り/雑な eval でも勝てるが、強い相手は守備の隙や over-expansion を突く。random winrate は天井 (>0.90) に張り付きやすく識別力が低い。
   - 防止策: hypothesis の go 条件に random を含めない (no-regression の下限のみ)。改善を主張する相手は必ず prev_best / nearest_sniper にする。新 eval 項は強い相手で測ってから採否を決める。
+- INFO: `deeper_search_overfits_wrong_opponent_model` — beam の探索深度を上げる (SEARCH_DEPTH 2→3) と弱い相手で改善 (random 0.8667→0.9333 / nearest_sniper 0.5667→0.6) しつつ強い相手 prev_best (legacy-388) で 0.5667→0.4333 と regression する。`new_eval_term_helps_random_hurts_strong` と同じ helps-weak/hurts-strong パターンを **eval 項でなく search depth 経由**で示す 4 例目。
+  - 検出契機: exp/004 (H004d) depth=3。timing は安全 (max 27ms<<700ms budget) だが mix-eval winrate_min 0.4333<0.50 で gate FAIL → discard。
+  - 根本原因: beam の opponent simulation (`_simulate_opponents` → `_phase1_decisions` heuristic) が legacy-388 の実挙動と乖離している。深く読むほどこの**誤った opponent モデルへ過適合**し、実際の強い相手に対し読み筋がズレて守備/攻撃判断が悪化する。depth=2 は浅いため過適合が浅く害が小さい。
+  - 重要: budget/width はレバーでない。depth=2/width=16 で beam は max 6ms (budget 300ms) しか使わず、width sweep (16/24/32) は frontier 飽和で timing 完全同一 = no-op。search 強化の唯一の実効軸は depth、だが depth は opponent モデル精度に律速される。
+  - 防止策: search depth を上げる前に opponent モデルを実挙動に近づける (H011 PUCT-MCTS の rollout policy、H013 opponent classifier)。正しい opponent モデルが無い段階での depth 増は強い相手で逆効果。
