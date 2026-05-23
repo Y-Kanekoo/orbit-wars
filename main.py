@@ -34,7 +34,9 @@ from src.utils import action as _action  # noqa: E402
 from src.utils import telemetry as _tel  # noqa: E402
 from src.utils.timing import Timer  # noqa: E402
 
-_BEAM_TIME_BUDGET_SEC = 0.3
+# H004: depth=3 でも実測 max 27ms のため headroom only。万一の spike 時に
+# deadline 0.90s 内で beam が完走できる余地を確保 (挙動は depth 変更が主因)。
+_BEAM_TIME_BUDGET_SEC = 0.7
 
 
 def _core_act(obs: Any, deadline: float) -> list[list[Any]]:
