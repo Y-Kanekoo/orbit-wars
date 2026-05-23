@@ -16,7 +16,9 @@ from src.strategy.geometry import angle_to, avoidance_angle, distance, fleet_spe
 from src.strategy.targeting import PlanetView, pick_best_target, score_target
 from src.strategy.threat import FleetView, incoming_threat
 
-SEARCH_DEPTH = 2
+# H004d: depth 2→3 で 1 turn 余分に先読み (eval 不変)。実測 max 27ms で 1s/turn 制約に余裕。
+# width は frontier 飽和で 16 超は no-op のため据置。
+SEARCH_DEPTH = 3
 BEAM_WIDTH = 16
 ENEMY_CANDIDATES = 3
 NEUTRAL_CANDIDATES = 3
