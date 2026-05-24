@@ -5,17 +5,20 @@
         [--max-age-sec N] [--baseline-json state/best_score.json]
 
 gate 条件 (全て満たすと exit 0、 1 つでも欠けると exit 1):
-    winrate_random         >= baseline_random        (no-regression)
-    winrate_nearest_sniper >= baseline_nearest_sniper (no-regression)
-    winrate_prev_best      >= baseline_prev_best + 0.05 (改善要求)
-    winrate_min            >= 0.50                    (絶対下限)
-    errors_total           == 0
+    winrate_random             >= baseline_random        (no-regression)
+    winrate_nearest_sniper     >= baseline_nearest_sniper (no-regression)
+    winrate_min(random,sniper) >= 0.50                    (diverse-opponent 絶対下限)
+    prev_best                  >= 0.35                    (collapse tripwire のみ、改善要求なし)
+    errors_total               == 0
 
 baseline は --baseline-json (default state/best_score.json) の mix_eval.opponents.*.winrate
 から動的に読む (hardcode 回避)。mix_eval section が無い場合のみ保守的な絶対値に fallback。
 
-設計意図 (supervisor 通知2): 絶対値 gate (random>=0.90 等) は現 baseline (random 0.8667)
-すら通らないため、「baseline から悪化しない (no-regression) + prev_best は +0.05 改善」に変更。
+設計意図 (supervisor 通知3, 2026-05-24): prev_best (= legacy-388 ミラー) は biased low かつ
+LB 非予測のため block 条件から除外 (warn only)。6 連続 discard の真因が prev_best gate
+(+0.05 改善要求) と判明 — random/sniper は改善していた。prev_best は collapse (< 0.35) のみ
+tripwire、winrate_min も prev_best を除外し random/sniper のみで判定。LB regress 時は prev_best
+を no-regression (baseline 据置) に revert する (+0.05 版には戻さない、明確に誤りだった)。
 
 stale check: --max-age-sec を指定すると、 mix_eval の measured_at が古すぎる場合 block。
 """
@@ -28,8 +31,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-WIN_PREV_DELTA = 0.05  # prev_best には改善 (+5%) を要求
-WIN_MIN = 0.50  # どの相手にも負け越さない絶対下限
+PREV_FLOOR = 0.35  # prev_best (ミラー) collapse tripwire のみ。改善要求せず block 条件から除外
+WIN_MIN = 0.50  # random/sniper (diverse opponent) の絶対下限
 
 # best_score.json に mix_eval が無い場合の保守的 fallback (絶対値)
 FALLBACK_BASELINE = {
@@ -125,19 +128,24 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    winrate_min = mix.get("winrate_min", 0.0)
+    winrate_min = min(wr_random, wr_sniper)  # prev_best (mirror, biased low) は除外
     errors_total = mix.get("errors_total", 1)
 
     base = _baselines(baseline_path)
-    prev_gate = base["prev_best"] + WIN_PREV_DELTA
+
+    # prev_best (mirror) は non-blocking。collapse tripwire (< PREV_FLOOR) のみ block。
+    print(
+        f"  [INFO] prev_best (mirror, non-blocking) = {wr_prev} "
+        f"(baseline {base['prev_best']}、改善要求なし)",
+        file=sys.stderr,
+    )
 
     checks = {
         f"winrate_random ({wr_random}) >= baseline ({base['random']})": wr_random >= base["random"],
         f"winrate_nearest_sniper ({wr_sniper}) >= baseline ({base['nearest_sniper']})": wr_sniper
         >= base["nearest_sniper"],
-        f"winrate_prev_best ({wr_prev}) >= {prev_gate:.4f} "
-        f"(baseline {base['prev_best']}+{WIN_PREV_DELTA})": wr_prev >= prev_gate,
-        f"winrate_min ({winrate_min}) >= {WIN_MIN}": winrate_min >= WIN_MIN,
+        f"winrate_min random/sniper ({winrate_min}) >= {WIN_MIN}": winrate_min >= WIN_MIN,
+        f"prev_best ({wr_prev}) >= {PREV_FLOOR} (collapse tripwire)": wr_prev >= PREV_FLOOR,
         f"errors_total ({errors_total}) == 0": errors_total == 0,
     }
 
