@@ -84,7 +84,7 @@ def _run_gate(mix_path: Path, baseline_path: Path, *extra: str) -> int:
 
 def test_gate_pass(tmp_path: Path) -> None:
     base = _write_baseline(tmp_path)
-    # 全相手 baseline 以上、prev_best は +0.05 超 (0.6167)
+    # random/sniper baseline 以上、prev_best は non-blocking
     mix = _write_mix(
         tmp_path,
         random_wr=0.90,
@@ -137,13 +137,29 @@ def test_gate_fail_sniper_regression(tmp_path: Path) -> None:
 
 
 def test_gate_fail_winrate_min(tmp_path: Path) -> None:
+    # 新 gate: winrate_min = min(random, sniper)。sniper を 0.49 に落とすと
+    # winrate_min < 0.50 で block (sniper no-regression も同時に fail するが block は確実)
+    base = _write_baseline(tmp_path)
+    mix = _write_mix(
+        tmp_path,
+        random_wr=0.90,
+        sniper_wr=0.49,  # winrate_min=min(0.90,0.49)=0.49 < 0.50
+        prev_wr=0.65,
+        winrate_min=0.49,
+        errors_total=0,
+    )
+    assert _run_gate(mix, base) == 1
+
+
+def test_gate_fail_prev_collapse(tmp_path: Path) -> None:
+    # prev_best collapse (< PREV_FLOOR 0.35) は tripwire で block (mirror で壊滅的破綻)
     base = _write_baseline(tmp_path)
     mix = _write_mix(
         tmp_path,
         random_wr=0.90,
         sniper_wr=0.60,
-        prev_wr=0.65,
-        winrate_min=0.45,  # < 0.50
+        prev_wr=0.30,  # < 0.35
+        winrate_min=0.60,
         errors_total=0,
     )
     assert _run_gate(mix, base) == 1
@@ -162,18 +178,19 @@ def test_gate_fail_errors(tmp_path: Path) -> None:
     assert _run_gate(mix, base) == 1
 
 
-def test_gate_fail_prev_no_improvement(tmp_path: Path) -> None:
+def test_gate_pass_prev_low_non_blocking(tmp_path: Path) -> None:
+    # 新 gate: prev_best は non-blocking。改善なし (mirror regression 0.4667) でも
+    # >= 0.35 かつ random/sniper OK なら pass (H024 の実数値ケース)
     base = _write_baseline(tmp_path)
-    # prev 0.60 は baseline 0.5667 + 0.05 = 0.6167 を超えない
     mix = _write_mix(
         tmp_path,
-        random_wr=0.90,
+        random_wr=0.9333,
         sniper_wr=0.60,
-        prev_wr=0.60,
-        winrate_min=0.60,
+        prev_wr=0.4667,  # baseline 0.5667 から下落だが non-blocking
+        winrate_min=0.4667,
         errors_total=0,
     )
-    assert _run_gate(mix, base) == 1
+    assert _run_gate(mix, base) == 0
 
 
 def test_gate_stale(tmp_path: Path) -> None:
