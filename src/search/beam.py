@@ -16,10 +16,7 @@ from src.strategy.geometry import angle_to, avoidance_angle, distance, fleet_spe
 from src.strategy.targeting import PlanetView, pick_best_target, score_target
 from src.strategy.threat import FleetView, incoming_threat
 
-# H023: opponent model を beam-at-depth-1 argmax に強化した上で depth=3 を test 条件に。
-# 旧 depth=2 + 純 greedy opponent (_phase1_decisions) では深い探索の過適合が露呈しないため
-# (H004 で depth=3 + 旧 opponent が prev_best 0.5667→0.4333 regression)。
-SEARCH_DEPTH = 3
+SEARCH_DEPTH = 2
 BEAM_WIDTH = 16
 ENEMY_CANDIDATES = 3
 NEUTRAL_CANDIDATES = 3
@@ -486,45 +483,14 @@ def _expand_turn(
     return frontier
 
 
-def _opponent_best_actions(state: SearchState, opponent: int) -> SearchState:
-    """opponent を beam-at-depth-1 (width 1) で 1 手進める。
-
-    H023: 旧 `_phase1_decisions` (純 greedy phase1) は実 strong opponent (legacy-388 =
-    beam_search) より弱く、深い探索がこの誤った opponent モデルへ過適合していた疑い。
-    本 helper は beam 自身が使う `_candidate_actions_for_planet` 候補を opponent 視点の
-    `_score_state` で評価し argmax を逐次適用する (= beam が自分に対してやる探索の depth-1
-    版を opponent に適用)。これにより opponent の読み筋が beam 自身と一致する。
-    """
-    next_state = state
-    my_planets = sorted(
-        [planet for planet in next_state.planets if planet.owner == opponent],
-        key=lambda planet: planet.id,
-    )
-    for source in my_planets:
-        live_source = _get_planet(next_state, source.id)
-        if live_source is None or live_source.owner != opponent:
-            continue
-        candidates = _candidate_actions_for_planet(next_state, live_source, opponent)
-        best_action: Action | None = None
-        best_score: float | None = None
-        for action in candidates:
-            candidate_state = _apply_action(next_state, action, root_depth=False)
-            score = _score_state(candidate_state, opponent)
-            if best_score is None or score > best_score:
-                best_score = score
-                best_action = action
-        if best_action is not None:
-            next_state = _apply_action(next_state, best_action, root_depth=False)
-    return next_state
-
-
 def _simulate_opponents(state: SearchState, player: int) -> SearchState:
     next_state = state
     opponents = sorted(
         {planet.owner for planet in state.planets if planet.owner not in (-1, player)}
     )
     for opponent in opponents:
-        next_state = _opponent_best_actions(next_state, opponent)
+        for action in _phase1_decisions(next_state, opponent):
+            next_state = _apply_action(next_state, action, root_depth=False)
     return next_state
 
 
