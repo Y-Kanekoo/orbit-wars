@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "version": "v0",
-  "lb_score": 410.7,
+  "lb_score": 414.2,
   "lb_score_sigma": null,
   "played_episodes": null,
   "local_winrate_vs_random": 0.8667,
@@ -27,5 +27,5 @@
   "agent_file": "main.py",
   "agent_sha": null,
   "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16) + parity fix (PR #37)",
-  "notes": "PARITY 確定 (LB 410.7, submission 52032932)。H021 mix-eval infra 完了: schema v2 で baseline mix_eval を記録 (random 0.8667 / nearest_sniper 0.5667 / prev_best 0.5667, errors=0)。submit gate は no-regression 方式 (exp/021b): 次の hypothesis は random>=0.8667 AND nearest_sniper>=0.5667 AND prev_best>=0.6167 (baseline+0.05) AND winrate_min>=0.50 AND errors=0。baseline は本 json の mix_eval から動的読込。"
+  "notes": "PARITY 確定 (baseline submission 52032932, LB 410.7→414.2 に episode 蓄積で再計算)。H021 mix-eval infra 完了: schema v2 で baseline mix_eval を記録 (random 0.8667 / nearest_sniper 0.5667 / prev_best 0.5667, errors=0)。submit gate は no-regression 方式 (exp/021b): 次の hypothesis は random>=0.8667 AND nearest_sniper>=0.5667 AND prev_best>=0.6167 (baseline+0.05) AND winrate_min>=0.50 AND errors=0。baseline は本 json の mix_eval から動的読込。H024 (exp025 fleet projection) は relaxed gate PASS で提出 (52989108) も LB 378.2 (-36.0) と regression、beam.py を frozen baseline に revert して discard、baseline 414.2 維持。"
 }
