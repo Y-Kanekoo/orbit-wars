@@ -51,7 +51,14 @@ fi
 MAX_ITERS="${ORBIT_MAX_ITERS:-30}"              # ループ回数上限
 MAX_HOURS="${ORBIT_MAX_HOURS:-12}"              # wall-clock 上限 (時間)
 MAX_BUDGET_PER_ITER="${ORBIT_MAX_BUDGET_USD:-8}" # 1 iter のコスト上限 (USD)
-MAX_CONSECUTIVE_FAILURES="${ORBIT_MAX_FAILS:-3}" # 連続失敗で停止
+MAX_CONSECUTIVE_FAILURES="${ORBIT_MAX_FAILS:-3}" # 連続失敗で停止 (session limit は除外)
+SESSION_RETRY_SLEEP="${ORBIT_SESSION_RETRY_SLEEP:-1800}" # session limit 検出時の再試行 sleep (秒、quota リセット待ち)
+MAX_SESSION_RETRIES="${ORBIT_MAX_SESSION_RETRIES:-16}" # session limit 再試行の上限 (誤検出での無限ループ backstop。既定 16*1800s=8h)
+# usage/session limit 検出パターン (Claude Code 公式 error 文言: "You've hit your {session,weekly,Opus} limit · resets …")。
+# apostrophe ('/' curly どちらか) を含めると C locale の grep で multi-byte が
+# 単一バイト扱いになり MISS し得るため、apostrophe を含まない "hit your … limit"
+# でマッチ (locale 非依存・十分に distinctive)。誤検出時は env で上書き可。
+SESSION_LIMIT_PATTERN="${ORBIT_SESSION_LIMIT_PATTERN:-hit your .+ limit}"
 COOLDOWN_SEC="${ORBIT_COOLDOWN_SEC:-30}"        # iter 間 cooldown
 MODEL="${ORBIT_MODEL:-opus}"
 EFFORT="${ORBIT_EFFORT:-high}"
@@ -59,10 +66,13 @@ DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
 # ---- claude CLI 解決 (cmux.app GUI ラッパー回避) ----
-CLAUDE_BIN=""
-for cand in "$HOME/.local/bin/claude" "/opt/homebrew/bin/claude" "/usr/local/bin/claude"; do
-  if [ -x "$cand" ]; then CLAUDE_BIN="$cand"; break; fi
-done
+# ORBIT_CLAUDE_BIN で上書き可 (smoke test で stub を注入するため)。
+CLAUDE_BIN="${ORBIT_CLAUDE_BIN:-}"
+if [ -z "$CLAUDE_BIN" ]; then
+  for cand in "$HOME/.local/bin/claude" "/opt/homebrew/bin/claude" "/usr/local/bin/claude"; do
+    if [ -x "$cand" ]; then CLAUDE_BIN="$cand"; break; fi
+  done
+fi
 if [ -z "$CLAUDE_BIN" ]; then
   echo "[loop] claude CLI 未 install (~/.local/bin/claude 推奨)。" >&2
   exit 3
@@ -108,6 +118,7 @@ echo "[loop] log: $LOGFILE"
 
 START_EPOCH=$(date +%s)
 failures=0
+session_retries=0
 iter=0
 
 while [ "$iter" -lt "$MAX_ITERS" ]; do
@@ -136,15 +147,35 @@ while [ "$iter" -lt "$MAX_ITERS" ]; do
     break
   fi
 
-  # 1 iteration を fresh context で実行。
-  if "$CLAUDE_BIN" -p "$ITER_PROMPT" \
+  # 1 iteration を fresh context で実行。出力は session-limit 検出のため一時退避。
+  # PIPESTATUS[0] で tee ではなく claude 本体の exit code を取得する。
+  ITER_OUT="$(mktemp "${TMPDIR:-/tmp}/orbit_iter.XXXXXX")"
+  "$CLAUDE_BIN" -p "$ITER_PROMPT" \
        --permission-mode bypassPermissions \
        --max-budget-usd "$MAX_BUDGET_PER_ITER" \
        --model "$MODEL" \
-       --effort "$EFFORT" 2>&1 | tee -a "$LOGFILE"; then
+       --effort "$EFFORT" 2>&1 | tee -a "$LOGFILE" "$ITER_OUT"
+  rc=${PIPESTATUS[0]}
+
+  if [ "$rc" -eq 0 ]; then
     failures=0
+    session_retries=0
+    rm -f "$ITER_OUT"
     echo "[loop] iter $iter 完了 $(date -u +%FT%TZ)" | tee -a "$LOGFILE"
+  elif grep -qiE "$SESSION_LIMIT_PATTERN" "$ITER_OUT"; then
+    # usage/session limit: 連続失敗に計上せず quota リセットを待って同一 iter を再試行。
+    rm -f "$ITER_OUT"
+    session_retries=$((session_retries + 1))
+    if [ "$session_retries" -gt "$MAX_SESSION_RETRIES" ]; then
+      echo "[loop] session limit 再試行が上限 ${MAX_SESSION_RETRIES} 回を超過 — 停止 (supervisor 介入が必要)" | tee -a "$LOGFILE"
+      break
+    fi
+    echo "[loop] usage/session limit 検出 — 失敗に計上せず ${SESSION_RETRY_SLEEP}s 待機後に iter $iter を再試行 (session_retry ${session_retries}/${MAX_SESSION_RETRIES}) $(date -u +%FT%TZ)" | tee -a "$LOGFILE"
+    iter=$((iter - 1))   # iter 番号を消費せず同一 iter を retry (top で +1 され同番号で再実行)
+    sleep "$SESSION_RETRY_SLEEP"
+    continue             # 通常 cooldown は skip
   else
+    rm -f "$ITER_OUT"
     failures=$((failures + 1))
     echo "[loop] iter $iter 失敗 (${failures}/${MAX_CONSECUTIVE_FAILURES}) $(date -u +%FT%TZ)" | tee -a "$LOGFILE"
     if [ "$failures" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
