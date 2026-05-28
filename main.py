@@ -28,26 +28,37 @@ except NameError:
     # kaggle_environments exec context: __file__ 不在
     pass
 
+import os  # noqa: E402
+
 from src.agents.safe_fallback import act as _safe_act  # noqa: E402
 from src.search.beam import search as _beam_search  # noqa: E402
+from src.search.mcts import search as _mcts_search  # noqa: E402
 from src.utils import action as _action  # noqa: E402
 from src.utils import telemetry as _tel  # noqa: E402
 from src.utils.timing import Timer  # noqa: E402
 
 _BEAM_TIME_BUDGET_SEC = 0.3
+_MCTS_TIME_BUDGET_SEC = 0.3
+_MCTS_ENABLED = os.environ.get("ORBIT_WARS_MCTS", "0") == "1"
 
 
 def _core_act(obs: Any, deadline: float) -> list[list[Any]]:
-    """Phase 1+ heuristic 本体: legacy-388 移植 beam + H001 territory eval。
+    """Phase 1+ heuristic 本体: legacy-388 移植 beam + H001 territory eval、
+    `ORBIT_WARS_MCTS=1` で H011 PUCT-MCTS minimal に切替。
 
-    deadline (monotonic 絶対時刻) から残予算を計算し、beam に渡す。
+    deadline (monotonic 絶対時刻) から残予算を計算し search に渡す。
     残予算が 0 以下なら safe_act にフォールバック。
     """
     remaining = max(0.0, deadline - time.monotonic())
+    player = int(obs.get("player", 0)) if isinstance(obs, dict) else int(getattr(obs, "player", 0))
+    if _MCTS_ENABLED:
+        budget = min(_MCTS_TIME_BUDGET_SEC, remaining)
+        if budget <= 0.05:
+            return _safe_act(obs)
+        return _mcts_search(obs, player, time_budget_sec=budget)
     budget = min(_BEAM_TIME_BUDGET_SEC, remaining)
     if budget <= 0.05:
         return _safe_act(obs)
-    player = int(obs.get("player", 0)) if isinstance(obs, dict) else int(getattr(obs, "player", 0))
     return _beam_search(obs, player, time_budget_sec=budget)
 
 

@@ -35,7 +35,7 @@ B-7 (Phase 0 完了基準) として ≥ 10 件の populate が必要 (PLAN.md L
 | H008 | active | 1 | 4 | 3 | +30 | beam の action_gen で空 action set `[]` も必ず候補に含める ("do nothing" 評価) | vs H004 N=30 winrate>50% (= 棄損しない) | PLAN.md B-8 |
 | H009 | active | 1 | 4 | 5 | +60 | multi-launch per planet: 1 turn の compound action を最大 K=3-5 launch list で生成 | vs H004 N=30 winrate≥55% | PLAN.md B-3 |
 | H010 | active | 1 | 3 | 4 | +40 | depth-1 defensive minimax (自分 1 手 → 敵最悪応手) を eval に組込 | vs H003 N=30 winrate≥55% | PLAN.md B-12 |
-| H011 | active | 2 | 5 | 8 | +150 | PUCT-MCTS、rollout 200-400 (1秒予算)、rollout policy = Phase 1 heuristic | vs Phase 1 best N=50 winrate≥65%、LB ≥950 | PLAN.md L294, 303 |
+| H011 | discarded | 2 | 5 | 8 | +150 | PUCT-MCTS、rollout 200-400 (1秒予算)、rollout policy = Phase 1 heuristic | vs Phase 1 best N=50 winrate≥65%、LB ≥950 | PLAN.md L294, 303。**exp/028 で minimal 実装→ relaxed gate FAIL → discard**: random 0.8667→1.0↑ / sniper 0.5667→0.20↓↓ / prev_best 0.5667→0.1667↓↓、winrate_min(random,sniper)=0.20<0.50。helps-weak/hurts-strong 6 系統目、パラダイム置換でも症状悪化。learned_rules INFO `paradigm_swap_alone_does_not_fix_helps_weak_hurts_strong` 昇格。src/search/mcts.py は default OFF (`ORBIT_WARS_MCTS=1` 切替) で残置 (H012/H014 等の MCTS 系後続改善の infra として)、main parity (baseline 414.2) 不変 |
 | H012 | active | 2 | 4 | 4 | +50 | MCTS progressive widening (k=0.3-1.0 sweep) | best k vs default k N=30 winrate≥55% | PLAN.md L304 |
 | H013 | active | 2 | 3 | 6 | +70 | offline opponent classifier (expansion/aggression/comet_priority 3-class) + online dispatch | vs MCTS w/o dispatch N=30 winrate≥55% | PLAN.md L308 |
 | H014 | active | 2 | 3 | 6 | +30 | MCTS transposition table (Zobrist hash) で同一状態再訪コスト排除 | rollout/sec が 1.5-2x | PLAN.md A-16 |
