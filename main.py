@@ -38,7 +38,7 @@ from src.utils import telemetry as _tel  # noqa: E402
 from src.utils.timing import Timer  # noqa: E402
 
 _BEAM_TIME_BUDGET_SEC = 0.3
-_MCTS_TIME_BUDGET_SEC = 0.8
+_MCTS_TIME_BUDGET_SEC = 0.3
 _MCTS_ENABLED = os.environ.get("ORBIT_WARS_MCTS", "0") == "1"
 
 
