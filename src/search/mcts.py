@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import math
+import os
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +28,7 @@ from src.search.beam import (
     _actions_to_moves,
     _advance_one_turn,
     _apply_actions,
+    _candidate_actions_for_planet,
     _expand_turn,
     _parse_obs,
     _phase1_decisions,
@@ -37,6 +40,13 @@ ROLLOUT_DEPTH = 2
 UCB_C = 1.4
 SIGMOID_SCALE = 100.0
 TIME_GUARD_RATIO = 0.85
+
+# H026 (exp/030) 診断: rollout policy を切替可能化 (default=phase1 で main parity 不変)。
+# ORBIT_WARS_MCTS=1 ROLLOUT_POLICY=uniform で exp028 (phase1 rollout) と A/B 比較し、
+# strong-opponent regression が phase1 rollout policy 由来かを切り分ける。
+ROLLOUT_POLICY = os.environ.get("ROLLOUT_POLICY", "phase1")
+# rollout 用 RNG (seed 固定で決定論的、連続 draw で Monte Carlo 多様性を確保)。
+_ROLLOUT_RNG = random.Random(0xC0FFEE)
 
 
 @dataclass(slots=True)
@@ -56,10 +66,27 @@ def _ucb1(child: MCTSNode, parent_visits: int) -> float:
     return exploit + explore
 
 
+def _uniform_decisions(state: SearchState, player: int) -> list:
+    """uniform rollout policy: 各自軍 planet の候補 action から一様ランダムに 1 つ選ぶ。
+
+    phase1 (greedy heuristic) の代替。`_candidate_actions_for_planet` は wait (do nothing)
+    を常に含むため、launch しない選択肢も等確率で評価される。
+    """
+    actions = []
+    for planet in state.planets:
+        if planet.owner != player:
+            continue
+        candidates = _candidate_actions_for_planet(state, planet, player)
+        if candidates:
+            actions.append(_ROLLOUT_RNG.choice(candidates))
+    return actions
+
+
 def _rollout_value(state: SearchState, player: int) -> float:
+    policy = _uniform_decisions if ROLLOUT_POLICY == "uniform" else _phase1_decisions
     sim_state = state
     for _ in range(ROLLOUT_DEPTH):
-        actions = _phase1_decisions(sim_state, player)
+        actions = policy(sim_state, player)
         sim_state = _apply_actions(sim_state, actions, root_depth=False)
         sim_state = _advance_one_turn(_simulate_opponents(sim_state, player))
     score = _score_state(sim_state, player)

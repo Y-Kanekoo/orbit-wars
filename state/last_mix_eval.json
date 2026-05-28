@@ -1,41 +1,41 @@
 {
   "mode": "mix_eval",
-  "agent": "main.py",
+  "agent": "main.py (ORBIT_WARS_MCTS=1 ROLLOUT_POLICY=uniform, H026 診断)",
   "n_per_opponent": 30,
   "opponents": {
     "random": {
       "opponent": "random",
       "n": 30,
       "valid_games": 30,
-      "wins": 30,
-      "losses": 0,
+      "wins": 29,
+      "losses": 1,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 1.0
+      "winrate": 0.9667
     },
     "nearest_sniper": {
       "opponent": "docs/competition/competition-starter-main.py",
       "n": 30,
       "valid_games": 30,
-      "wins": 6,
-      "losses": 24,
+      "wins": 9,
+      "losses": 21,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.2
+      "winrate": 0.3
     },
     "prev_best": {
       "opponent": "docs/competition/legacy-388/main.py",
       "n": 30,
       "valid_games": 30,
-      "wins": 5,
-      "losses": 25,
+      "wins": 4,
+      "losses": 26,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.1667
+      "winrate": 0.1333
     }
   },
-  "winrate_min": 0.1667,
+  "winrate_min": 0.1333,
   "errors_total": 0,
-  "measured_at": "2026-05-28T18:03:56Z",
+  "measured_at": "2026-05-28T20:06:25Z",
   "workers": 7
 }
