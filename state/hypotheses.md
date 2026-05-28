@@ -35,7 +35,7 @@ B-7 (Phase 0 完了基準) として ≥ 10 件の populate が必要 (PLAN.md L
 | H008 | active | 1 | 4 | 3 | +30 | beam の action_gen で空 action set `[]` も必ず候補に含める ("do nothing" 評価) | vs H004 N=30 winrate>50% (= 棄損しない) | PLAN.md B-8 |
 | H009 | active | 1 | 4 | 5 | +60 | multi-launch per planet: 1 turn の compound action を最大 K=3-5 launch list で生成 | vs H004 N=30 winrate≥55% | PLAN.md B-3 |
 | H010 | active | 1 | 3 | 4 | +40 | depth-1 defensive minimax (自分 1 手 → 敵最悪応手) を eval に組込 | vs H003 N=30 winrate≥55% | PLAN.md B-12 |
-| H011 | active | 2 | 5 | 8 | +150 | PUCT-MCTS、rollout 200-400 (1秒予算)、rollout policy = Phase 1 heuristic | vs Phase 1 best N=50 winrate≥65%、LB ≥950 | PLAN.md L294, 303 |
+| H011 | in_progress | 2 | 5 | 8 | +150 | PUCT-MCTS、rollout 200-400 (1秒予算)、rollout policy = Phase 1 heuristic | vs Phase 1 best N=50 winrate≥65%、LB ≥950 | PLAN.md L294, 303。**exp/028 で minimal 実装**: src/search/mcts.py 新規 (UCB1 + phase1 rollout depth=2、root branch のみ)、main.py `ORBIT_WARS_MCTS=1` 切替、本 iter は budget=0.3s で tournament 完了させる |
 | H012 | active | 2 | 4 | 4 | +50 | MCTS progressive widening (k=0.3-1.0 sweep) | best k vs default k N=30 winrate≥55% | PLAN.md L304 |
 | H013 | active | 2 | 3 | 6 | +70 | offline opponent classifier (expansion/aggression/comet_priority 3-class) + online dispatch | vs MCTS w/o dispatch N=30 winrate≥55% | PLAN.md L308 |
 | H014 | active | 2 | 3 | 6 | +30 | MCTS transposition table (Zobrist hash) で同一状態再訪コスト排除 | rollout/sec が 1.5-2x | PLAN.md A-16 |
