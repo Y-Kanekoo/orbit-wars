@@ -7,35 +7,35 @@
       "opponent": "random",
       "n": 30,
       "valid_games": 30,
-      "wins": 28,
-      "losses": 2,
+      "wins": 30,
+      "losses": 0,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.9333
+      "winrate": 1.0
     },
     "nearest_sniper": {
       "opponent": "docs/competition/competition-starter-main.py",
       "n": 30,
       "valid_games": 30,
-      "wins": 17,
-      "losses": 13,
+      "wins": 6,
+      "losses": 24,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.5667
+      "winrate": 0.2
     },
     "prev_best": {
       "opponent": "docs/competition/legacy-388/main.py",
       "n": 30,
       "valid_games": 30,
-      "wins": 18,
-      "losses": 12,
+      "wins": 5,
+      "losses": 25,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.6
+      "winrate": 0.1667
     }
   },
-  "winrate_min": 0.5667,
+  "winrate_min": 0.1667,
   "errors_total": 0,
-  "measured_at": "2026-05-24T14:08:47Z",
+  "measured_at": "2026-05-28T18:03:56Z",
   "workers": 7
 }
