@@ -22,9 +22,7 @@ ENEMY_CANDIDATES = 3
 NEUTRAL_CANDIDATES = 3
 FRIENDLY_CANDIDATES = 1
 TIME_GUARD_RATIO = 0.8
-TERRITORY_WEIGHT = (
-    0.0  # H001 default off (H000 parity 修復前は無効化、territory 計算自体も `if` で短絡)
-)
+TERRITORY_WEIGHT = 0.3  # H001 territory revisit (exp 027): exp 002 submission 52716957 が成熟 LB 423.2 (+9 vs baseline 414.2) で discard 判断逆転、resurrect。e68e217 の H001 構成と数値等価
 TERRITORY_SCALE = 100.0  # territory_share (0..1) を _score_state スケールに揃える
 # H002 discard: projection_total はスカラー加算で sweep 無効 (0.3/0.1 で prev_best 完全同一)、
 # production 二重カウントで over-expansion → prev_best regression。default off で再定式化 (H022) 待ち
