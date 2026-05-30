@@ -69,21 +69,7 @@ def avoidance_angle(
     direct = angle_to(from_x, from_y, to_x, to_y)
     if not segment_hits_sun(from_x, from_y, to_x, to_y, margin=margin):
         return direct
-    # 太陽の左右のどちらを回るかを、始点が太陽のどちら側にあるかで決める
     cx, cy = SUN_CENTER
     cross = (to_x - from_x) * (cy - from_y) - (to_y - from_y) * (cx - from_x)
     sign = 1.0 if cross > 0 else -1.0
-    # fleet は固定 heading の直線移動かつ sun-crossing で破壊されるため、
-    # 単一 12° では near-tangent 経路を抜けきれず fleet を太陽に捨てる。
-    # 偏向後の直線経路が太陽を抜けるまで段階的にオフセットを増やす (本格版)。
-    # 12° で抜けるケースは従来と完全同一出力 (失敗ケースのみ強い偏向を返す)。
-    dist = distance(from_x, from_y, to_x, to_y)
-    angle = direct + sign * math.radians(12.0)
-    for step_deg in range(12, 91, 12):
-        angle = direct + sign * math.radians(float(step_deg))
-        end_x = from_x + dist * math.cos(angle)
-        end_y = from_y + dist * math.sin(angle)
-        if not segment_hits_sun(from_x, from_y, end_x, end_y, margin=margin):
-            return angle
-    # 90° でも抜けない場合は best effort (最大偏向) を返す
-    return angle
+    return direct + sign * math.radians(12.0)
