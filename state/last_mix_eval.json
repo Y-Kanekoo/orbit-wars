@@ -17,25 +17,25 @@
       "opponent": "docs/competition/competition-starter-main.py",
       "n": 30,
       "valid_games": 30,
-      "wins": 18,
-      "losses": 12,
+      "wins": 11,
+      "losses": 19,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.6
+      "winrate": 0.3667
     },
     "prev_best": {
       "opponent": "docs/competition/legacy-388/main.py",
       "n": 30,
       "valid_games": 30,
-      "wins": 21,
-      "losses": 9,
+      "wins": 17,
+      "losses": 13,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.7
+      "winrate": 0.5667
     }
   },
-  "winrate_min": 0.6,
+  "winrate_min": 0.3667,
   "errors_total": 0,
-  "measured_at": "2026-05-30T18:59:45Z",
+  "measured_at": "2026-05-30T21:12:01Z",
   "workers": 7
 }
