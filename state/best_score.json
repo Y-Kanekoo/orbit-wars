@@ -1,31 +1,31 @@
 {
   "schema_version": 2,
-  "version": "v0",
-  "lb_score": 414.2,
+  "version": "v1",
+  "lb_score": 435.3,
   "lb_score_sigma": null,
   "played_episodes": null,
-  "local_winrate_vs_random": 0.8667,
-  "local_winrate_vs_nearest_sniper": 0.5667,
-  "local_winrate_vs_prev_best": 0.5667,
+  "local_winrate_vs_random": 0.9667,
+  "local_winrate_vs_nearest_sniper": 0.6,
+  "local_winrate_vs_prev_best": 0.7,
   "local_winrate_vs_prev_best_n": 30,
-  "local_winrate_vs_prev_best_measured_at": "2026-05-21T13:56:42Z",
+  "local_winrate_vs_prev_best_measured_at": "2026-05-30T18:59:45Z",
   "mix_eval": {
-    "agent": "main.py (parity baseline, TERRITORY_WEIGHT=0.0)",
+    "agent": "main.py (noop-opponent beam, H025/exp029, _simulate_opponents=noop)",
     "n_per_opponent": 30,
     "opponents": {
-      "random": {"winrate": 0.8667, "wins": 26, "n": 30, "errors": 0},
-      "nearest_sniper": {"winrate": 0.5667, "wins": 17, "n": 30, "errors": 0},
-      "prev_best": {"winrate": 0.5667, "wins": 17, "n": 30, "errors": 0}
+      "random": {"winrate": 0.9667, "wins": 29, "n": 30, "errors": 0},
+      "nearest_sniper": {"winrate": 0.6, "wins": 18, "n": 30, "errors": 0},
+      "prev_best": {"winrate": 0.7, "wins": 21, "n": 30, "errors": 0}
     },
-    "winrate_min": 0.5667,
+    "winrate_min": 0.6,
     "errors_total": 0,
-    "measured_at": "2026-05-21T13:56:42Z"
+    "measured_at": "2026-05-30T18:59:45Z"
   },
-  "submission_id": 52032932,
+  "submission_id": 53126719,
   "branch": "main",
-  "merged_at": "2026-04-25T13:19:25Z",
+  "merged_at": "2026-05-28T19:11:00Z",
   "agent_file": "main.py",
   "agent_sha": null,
-  "agent_signature": "legacy-388 (phase1+2 baseline beam depth=2 width=16) + parity fix (PR #37)",
-  "notes": "PARITY 確定 (baseline submission 52032932, LB 410.7→414.2 に episode 蓄積で再計算)。H021 mix-eval infra 完了: schema v2 で baseline mix_eval を記録 (random 0.8667 / nearest_sniper 0.5667 / prev_best 0.5667, errors=0)。submit gate は no-regression 方式 (exp/021b): 次の hypothesis は random>=0.8667 AND nearest_sniper>=0.5667 AND prev_best>=0.6167 (baseline+0.05) AND winrate_min>=0.50 AND errors=0。baseline は本 json の mix_eval から動的読込。H024 (exp025 fleet projection) は relaxed gate PASS で提出 (52989108) も LB 378.2 (-36.0) と regression、beam.py を frozen baseline に revert して discard、baseline 414.2 維持。"
+  "agent_signature": "noop-opponent beam (H025/exp029): legacy-388 beam depth=2 width=16 + _simulate_opponents を noop 化",
+  "notes": "【2026-05-30 reconciliation (autonomous iter)】新 baseline = exp029 noop-opponent beam, LB 435.3 (+21.1 vs 旧 baseline 414.2)。4月以来初の実 LB 改善。exp029 (PR #60) は既に main に merge 済 (HEAD 祖先 58ff36d)、提出 53126719 (2026-05-28)、48h+ 経過し LB table/leaderboard 両方で 435.3 安定確認。best_score.json は 414.2/52032932 のまま stale だったため現実 (main=noop beam) に同期。mix_eval は本 iter の fresh 再測定値 (現 main, 2026-05-30T18:59:45Z): random 0.9667 / nearest_sniper 0.6 / prev_best 0.7 / winrate_min 0.6 / errors=0。【N=30 ノイズの実証 (重要)】同一コード (現 main noop beam) で prev_best が ledger exp029 記録 0.4667 (14勝, 2026-05-28) → 本 iter 0.7 (21勝, 2026-05-30) と range 0.23 (7試合) も振れた。exp029 は提出時 0.4667 で no-regression gate FAIL 相当だったが LB +21、再測定では 0.7 で PASS。N=30 mix-eval prev_best は単一測定で gate 判定に使うには分散が大きすぎる (learned_rules `mixeval_prevbest_gate_noisy_misjudges_lb`)。【未解決 (supervisor escalate)】(1) 別 actor の提出 53173411 (kaggle 'exp 032 H009 multi-launch', 2026-05-30, LB 403.4 < 435.3) が local ledger exp032 (H016 encoder infra) と exp 番号衝突 — 並行 worktree/supervisor の提出管理と exp 番号体系の untangle 要。(2) quota.json も date 2026-05-24 で stale。(3) leaderboard 上位は 1400-1750 で 435.3 は低順位、Phase 3 NN (H016) escalate の緊急度高。"
 }
