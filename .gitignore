@@ -65,3 +65,4 @@ logs/
 # Reports (生成物、commit しない)
 reports/
 *.daily.md
+data/*.npz
