@@ -125,6 +125,26 @@ def collect_game(
     return samples, rewards
 
 
+class _Task(NamedTuple):
+    """1 game の実行指示 (並列 worker へ渡す picklable な引数束)。"""
+
+    a1: str
+    a2: str
+    seed: int
+    stride: int
+    task_idx: int  # 投入順の安定 id (crash 除外後に game_id へ dense 再採番)
+
+
+def _run_task(task: _Task) -> tuple[int, list[Sample], list[float]]:
+    """worker entry point: 1 game を収集し (task_idx, samples, rewards) を返す。
+
+    game_id は collect_game に task_idx を渡しておき、呼び出し側で crash 除外後に
+    dense 再採番する (並列実行で投入順と完了順がズレるため task_idx で安定整列)。
+    """
+    samples, rewards = collect_game(task.a1, task.a2, task.seed, task.stride, game_id=task.task_idx)
+    return task.task_idx, samples, rewards
+
+
 def export(
     agent: str,
     opponents: list[str],
@@ -132,17 +152,21 @@ def export(
     stride: int,
     seed_base: int,
     out_path: Path,
+    workers: int = 1,
 ) -> dict:
     """opponents mix で self-play し、value dataset を npz に書き出す。
 
     seat split: 偶数 game は agent=p1、奇数 game は agent=p2 で seat bias を平準化。
+    workers>1 で game 単位に multiprocess 並列化する (各 game は独立に env を make する
+    self-contained 処理のため fan-out 可能、Kaggle の複数 CPU core を活用)。結果は
+    task_idx で投入順に整列し、crash 除外後に game_id を dense 再採番するため
+    workers 値に依存せず決定的 (workers=1 は従来逐次挙動と同一)。
     """
     a_agent = _resolve_agent(agent)
-    all_samples: list[Sample] = []
-    games_used = 0
-    games_skipped = 0
-    game_id = 0  # crash 除外後の有効 game に連番付与 (grouped split 用の安定 id)
 
+    # 投入順 task list を構築 (opponent 外ループ × game 内ループ、seat swap は従来同一)
+    tasks: list[_Task] = []
+    task_idx = 0
     for opp in opponents:
         a_opp = _resolve_agent(opp)
         for g in range(games_per_opponent):
@@ -151,13 +175,36 @@ def export(
                 a1, a2 = a_agent, a_opp
             else:
                 a1, a2 = a_opp, a_agent  # seat swap
-            samples, rewards = collect_game(a1, a2, seed, stride, game_id=game_id)
-            if not samples:
-                games_skipped += 1
-                continue
-            all_samples.extend(samples)
-            games_used += 1
-            game_id += 1
+            tasks.append(_Task(a1=a1, a2=a2, seed=seed, stride=stride, task_idx=task_idx))
+            task_idx += 1
+
+    # task_idx -> (samples, rewards) を収集 (workers>1 は ProcessPool で fan-out)
+    results: dict[int, list[Sample]] = {}
+    if workers <= 1:
+        for task in tasks:
+            _, samples, _ = _run_task(task)
+            results[task.task_idx] = samples
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            for idx, samples, _ in pool.map(_run_task, tasks):
+                results[idx] = samples
+
+    # task 投入順に走査し、非空 (=non-crash) game に game_id を dense 再採番
+    all_samples: list[Sample] = []
+    games_used = 0
+    games_skipped = 0
+    game_id = 0
+    for task in tasks:
+        samples = results.get(task.task_idx, [])
+        if not samples:
+            games_skipped += 1
+            continue
+        # collect_game には task_idx を game_id として渡したため dense id に書き換える
+        all_samples.extend(s._replace(game_id=game_id) for s in samples)
+        games_used += 1
+        game_id += 1
 
     if not all_samples:
         raise RuntimeError("有効サンプルゼロ (全 game が crash suspect の可能性)")
@@ -242,6 +289,12 @@ def main() -> int:
     ap.add_argument("--games-per-opponent", type=int, default=4)
     ap.add_argument("--stride", type=int, default=4)
     ap.add_argument("--seed-base", type=int, default=1000)
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="game 単位の multiprocess 並列数 (Kaggle で os.cpu_count() 推奨、1 で逐次)",
+    )
     ap.add_argument("--out", default="data/value_dataset.npz")
     ap.add_argument(
         "--smoke",
@@ -261,6 +314,7 @@ def main() -> int:
         stride=args.stride,
         seed_base=args.seed_base,
         out_path=_ROOT / args.out if not Path(args.out).is_absolute() else Path(args.out),
+        workers=args.workers,
     )
     import json
 
