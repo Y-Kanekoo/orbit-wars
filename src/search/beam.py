@@ -41,6 +41,7 @@ class ProjectedPlanet:
     radius: float
     ships: int
     production: int
+    is_comet: bool = False  # H006 (exp/039): comet_planet_ids に含まれる planet
 
     @classmethod
     def from_raw(cls, row: tuple | list) -> ProjectedPlanet:
@@ -63,6 +64,7 @@ class ProjectedPlanet:
             radius=self.radius,
             ships=self.ships,
             production=self.production,
+            is_comet=self.is_comet,
         )
 
 
@@ -127,6 +129,7 @@ class SearchState:
                     radius=p.radius,
                     ships=p.ships,
                     production=p.production,
+                    is_comet=p.is_comet,
                 )
                 for p in self.planets
             ],
@@ -136,18 +139,20 @@ class SearchState:
         )
 
 
-def _parse_obs(obs: Any) -> tuple[int, list, list, int]:
+def _parse_obs(obs: Any) -> tuple[int, list, list, int, set[int]]:
     if isinstance(obs, dict):
         player = int(obs.get("player", 0))
         raw_planets = list(obs.get("planets", []))
         raw_fleets = list(obs.get("fleets", []))
         step = int(obs.get("step", 0))
+        comet_ids = obs.get("comet_planet_ids", []) or []
     else:
         player = int(getattr(obs, "player", 0))
         raw_planets = list(getattr(obs, "planets", []))
         raw_fleets = list(getattr(obs, "fleets", []))
         step = int(getattr(obs, "step", 0))
-    return player, raw_planets, raw_fleets, step
+        comet_ids = getattr(obs, "comet_planet_ids", []) or []
+    return player, raw_planets, raw_fleets, step, {int(c) for c in comet_ids}
 
 
 def _get_planet(state: SearchState, planet_id: int) -> ProjectedPlanet | None:
@@ -509,12 +514,19 @@ def _rollout_phase1_baseline(
 
 def search(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[list[float]]:
     """beam search による 1 ターン分の moves。"""
-    parsed_player, raw_planets, raw_fleets, step = _parse_obs(obs)
+    parsed_player, raw_planets, raw_fleets, step, comet_ids = _parse_obs(obs)
     if player != parsed_player:
         player = parsed_player
 
+    initial_planets: list[ProjectedPlanet] = []
+    for planet in raw_planets:
+        projected = ProjectedPlanet.from_raw(planet)
+        if projected.id in comet_ids:
+            projected.is_comet = True
+        initial_planets.append(projected)
+
     initial = SearchState(
-        planets=[ProjectedPlanet.from_raw(planet) for planet in raw_planets],
+        planets=initial_planets,
         fleets=[
             ProjectedFleet(
                 owner=int(fleet[1]),
