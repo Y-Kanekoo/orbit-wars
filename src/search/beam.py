@@ -484,14 +484,10 @@ def _expand_turn(
 
 
 def _simulate_opponents(state: SearchState, player: int) -> SearchState:
-    next_state = state
-    opponents = sorted(
-        {planet.owner for planet in state.planets if planet.owner not in (-1, player)}
-    )
-    for opponent in opponents:
-        for action in _phase1_decisions(next_state, opponent):
-            next_state = _apply_action(next_state, action, root_depth=False)
-    return next_state
+    # H025 (exp/029) 診断: phase1 rollout policy が strong-opponent regression の
+    # 真因かを切り分けるため、探索内 opponent モデルを noop に置換。
+    # in-flight fleets は別経路で advance されるため、ここでは新規 launch を抑止。
+    return state
 
 
 def _rollout_phase1_baseline(
