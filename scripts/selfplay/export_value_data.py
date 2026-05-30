@@ -63,6 +63,7 @@ class Sample(NamedTuple):
     value: float
     player: int
     step: int
+    game_id: int
 
 
 def _resolve_agent(name: str) -> str:
@@ -75,12 +76,15 @@ def _resolve_agent(name: str) -> str:
 
 
 def collect_game(
-    agent1: str, agent2: str, seed: int, stride: int = 1
+    agent1: str, agent2: str, seed: int, stride: int = 1, game_id: int = 0
 ) -> tuple[list[Sample], list[float]]:
     """1 試合を実行し、各 player・各 timestep のサンプル列と最終 rewards を返す。
 
     stride>1 で timestep を間引く (連続局面の相関を抑え dataset を圧縮)。
     crash suspect 試合は空サンプル + rewards を返す (呼び出し側で除外)。
+    game_id は train/val を **game 単位で grouped split** するための識別子
+    (MC-outcome は同一 game の全 timestep が同一 value target のため、timestep
+    random split は val loss を leakage で楽観化させる → 学習側で game_id 分割が必須)。
     """
     from kaggle_environments import make
 
@@ -115,6 +119,7 @@ def collect_game(
                     value=value,
                     player=o.player,
                     step=t,
+                    game_id=game_id,
                 )
             )
     return samples, rewards
@@ -136,6 +141,7 @@ def export(
     all_samples: list[Sample] = []
     games_used = 0
     games_skipped = 0
+    game_id = 0  # crash 除外後の有効 game に連番付与 (grouped split 用の安定 id)
 
     for opp in opponents:
         a_opp = _resolve_agent(opp)
@@ -145,12 +151,13 @@ def export(
                 a1, a2 = a_agent, a_opp
             else:
                 a1, a2 = a_opp, a_agent  # seat swap
-            samples, rewards = collect_game(a1, a2, seed, stride)
+            samples, rewards = collect_game(a1, a2, seed, stride, game_id=game_id)
             if not samples:
                 games_skipped += 1
                 continue
             all_samples.extend(samples)
             games_used += 1
+            game_id += 1
 
     if not all_samples:
         raise RuntimeError("有効サンプルゼロ (全 game が crash suspect の可能性)")
@@ -163,6 +170,7 @@ def export(
     value = np.asarray([s.value for s in all_samples], dtype=np.float32)
     player = np.asarray([s.player for s in all_samples], dtype=np.int32)
     step = np.asarray([s.step for s in all_samples], dtype=np.int32)
+    game_id = np.asarray([s.game_id for s in all_samples], dtype=np.int32)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -175,11 +183,13 @@ def export(
         value=value,
         player=player,
         step=step,
+        game_id=game_id,
     )
     return {
         "n_samples": len(all_samples),
         "games_used": games_used,
         "games_skipped": games_skipped,
+        "n_games": int(game_id.max()) + 1 if len(game_id) else 0,
         "value_min": float(value.min()),
         "value_max": float(value.max()),
         "win_frac": float((value > 0).mean()),
