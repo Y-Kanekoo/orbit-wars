@@ -6,6 +6,12 @@ from dataclasses import dataclass
 
 from src.strategy.geometry import distance, fleet_speed
 
+# H006 (exp/039): comet target bias。comet は spawn 時に neutral planet として
+# 可視化されるが現状 eval で完全に無視されている (transient だが安価に capture でき
+# 敵への denial 価値もある)。score_target に comet 選択 bias を加える (production への
+# additive scalar でなく target 選択軸 = eval_term_redundant_with_production 回避)。
+COMET_TARGET_BONUS = 6.0
+
 
 @dataclass(slots=True, frozen=True)
 class PlanetView:
@@ -16,6 +22,7 @@ class PlanetView:
     radius: float
     ships: int
     production: int
+    is_comet: bool = False
 
     @classmethod
     def from_raw(cls, row: tuple) -> PlanetView:
@@ -44,6 +51,10 @@ def score_target(
     turns = d / max(v, 1e-6)
     garrison_cost = target.ships if target.owner != my_player else 0
     value = target.production * w_production
+    # comet は自軍以外かつ on-board (off-board sentinel x=-99 を除外) のとき
+    # capture/denial 優先 bias を付与。距離 penalty は据置なので遠方 comet は追わない。
+    if target.is_comet and target.owner != my_player and target.x >= 0.0:
+        value += COMET_TARGET_BONUS
     return value - w_distance * turns - w_garrison * garrison_cost
 
 
