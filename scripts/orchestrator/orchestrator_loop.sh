@@ -47,6 +47,18 @@ if command -v tmux >/dev/null 2>&1 && tmux ls -F '#{session_name}' 2>/dev/null |
   exit 6
 fi
 
+# プロセス重複起動防止 (launchd の KeepAlive と手動実行の競合を阻止)。
+# 自分以外の orchestrator_loop.sh プロセスが居たら exit。launchd は
+# ThrottleInterval (既定 1800s) で再試行するので、先行プロセス終了後に
+# 自然に新インスタンスが立ち上がる。
+SELF_PID=$$
+EXISTING_LOOP_PIDS=$(pgrep -f "orchestrator_loop\.sh" 2>/dev/null | grep -v "^${SELF_PID}$" | head -5 | tr '\n' ' ')
+if [ -n "$EXISTING_LOOP_PIDS" ]; then
+  echo "[loop] ERROR: 既に orchestrator_loop.sh が走行中 (PIDs: ${EXISTING_LOOP_PIDS%% })。" >&2
+  echo "[loop] 二重起動を防ぐため停止します。先行プロセスの終了待ち、または kill 後に再試行してください。" >&2
+  exit 7
+fi
+
 # ---- 設定 (環境変数で上書き可) ----
 MAX_ITERS="${ORBIT_MAX_ITERS:-30}"              # ループ回数上限
 MAX_HOURS="${ORBIT_MAX_HOURS:-12}"              # wall-clock 上限 (時間)

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  orchestrator_loop.sh の自動再起動 LaunchAgent。
+  - KeepAlive: true  (loop が exit (12h / 30iter / 3失敗 / 等) するたびに再起動)
+  - ThrottleInterval: 1800  (30 分以内の連続再起動を禁止 = crash loop 防止)
+  - 二重起動防止は orchestrator_loop.sh 内の pgrep guard (exit 7) が担う
+  install.sh が __HOME__ を実際の $HOME に置換する。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.orbit-wars.loop</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/Projects/orbit-wars</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>scripts/orchestrator/orchestrator_loop.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/orbit_loop_launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/orbit_loop_launchd.err</string>
+</dict>
+</plist>

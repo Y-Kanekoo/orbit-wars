@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  awaiting_lb_recommender.sh の定期実行 LaunchAgent。
+  - StartInterval: 43200  (12h ごと、初回は load 後すぐ + RunAtLoad)
+  - awaiting_lb な OPEN PR を巡回し live LB に基づき merge/revert/wait 推奨を PR にコメント
+  - 冪等: 前回投稿から LB 変動 < 2pt かつ同じ推奨なら skip
+  - 環境変数 ORBIT_BASELINE_LB を 414.2 で固定 (state ファイル鮮度に依存しない)
+  install.sh が __HOME__ を実際の $HOME に置換する。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.orbit-wars.lb-recommender</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/Projects/orbit-wars</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>scripts/orchestrator/awaiting_lb_recommender.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>ORBIT_BASELINE_LB</key>
+        <string>414.2</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>43200</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/orbit_lb_recommender_launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/orbit_lb_recommender_launchd.err</string>
+</dict>
+</plist>
