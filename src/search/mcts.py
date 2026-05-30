@@ -48,6 +48,51 @@ ROLLOUT_POLICY = os.environ.get("ROLLOUT_POLICY", "phase1")
 # rollout 用 RNG (seed 固定で決定論的、連続 draw で Monte Carlo 多様性を確保)。
 _ROLLOUT_RNG = random.Random(0xC0FFEE)
 
+# H016 step 6: leaf 評価を NN value head に差し替える env flag (default OFF = 提出 parity)。
+# ORBIT_WARS_NN_VALUE=1 + ORBIT_WARS_NN_VALUE_MODEL=<onnx path> で有効。実モデルは
+# Kaggle GPU 学習後に差す (local export は ~74s/game で非現実、supervisor escalate)。
+_VALUE_MODEL = None  # lazy cache (ValueModel | None)
+_VALUE_MODEL_RESOLVED = False
+
+
+def reset_value_model() -> None:
+    """env を再読込させるため value model cache をクリアする (smoke / test 用)。"""
+    global _VALUE_MODEL, _VALUE_MODEL_RESOLVED
+    _VALUE_MODEL = None
+    _VALUE_MODEL_RESOLVED = False
+
+
+def _get_value_model():
+    """env flag に従い NN value model を解決 (なければ None = rollout 経路)。"""
+    global _VALUE_MODEL, _VALUE_MODEL_RESOLVED
+    if _VALUE_MODEL_RESOLVED:
+        return _VALUE_MODEL
+    _VALUE_MODEL_RESOLVED = True
+    if os.environ.get("ORBIT_WARS_NN_VALUE") != "1":
+        _VALUE_MODEL = None
+        return None
+    model_path = os.environ.get("ORBIT_WARS_NN_VALUE_MODEL", "")
+    if not model_path or not os.path.exists(model_path):
+        _VALUE_MODEL = None  # path 未指定/不在は安全に rollout fallback
+        return None
+    from src.nn.value_infer import ValueModel
+
+    _VALUE_MODEL = ValueModel(model_path)
+    return _VALUE_MODEL
+
+
+def _nn_leaf_value(state: SearchState, player: int, model, ctx) -> float:
+    """leaf state を NN value head で評価し [0,1] win-prob に写像する。
+
+    NN value は player 視点 (-1, 1) (+1=勝勢)。MCTS backup は rollout 経路と同一の
+    [0,1] スケールを期待する (UCB1 exploit / 最終 argmax) ため (v+1)/2 で線形写像。
+    """
+    from src.nn.value_infer import encode_search_state
+
+    enc = encode_search_state(state.planets, state.fleets, player, ctx)
+    v = model.evaluate(enc)  # (-1, 1)
+    return (v + 1.0) / 2.0
+
 
 @dataclass(slots=True)
 class MCTSNode:
@@ -141,10 +186,23 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
     if not root.children:
         return fallback_moves
 
+    # H016 step 6: NN value head が有効なら leaf 評価を rollout から差し替える。
+    # ctx (comet/angular_velocity/overage) は root obs から 1 度だけ parse して thread。
+    value_model = _get_value_model()
+    nn_ctx = None
+    if value_model is not None:
+        from src.nn.value_infer import context_from_observation
+        from src.utils.observation import parse
+
+        nn_ctx = context_from_observation(parse(obs))
+
     deadline = started_at + time_budget_sec * TIME_GUARD_RATIO
     while time.perf_counter() < deadline:
         chosen = max(root.children, key=lambda c: _ucb1(c, root.visits))
-        value = _rollout_value(chosen.state, player)
+        if value_model is not None:
+            value = _nn_leaf_value(chosen.state, player, value_model, nn_ctx)
+        else:
+            value = _rollout_value(chosen.state, player)
         chosen.visits += 1
         chosen.value_sum += value
         root.visits += 1
