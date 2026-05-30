@@ -1,0 +1,13 @@
+{
+  "id": "yukikanek0/orbit-wars-nn-value-train",
+  "title": "orbit-wars-nn-value-train",
+  "code_file": "nn_value_train.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}
