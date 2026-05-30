@@ -40,7 +40,7 @@ B-7 (Phase 0 完了基準) として ≥ 10 件の populate が必要 (PLAN.md L
 | H013 | active | 2 | 3 | 6 | +70 | offline opponent classifier (expansion/aggression/comet_priority 3-class) + online dispatch | vs MCTS w/o dispatch N=30 winrate≥55% | PLAN.md L308 |
 | H014 | active | 2 | 3 | 6 | +30 | MCTS transposition table (Zobrist hash) で同一状態再訪コスト排除 | rollout/sec が 1.5-2x | PLAN.md A-16 |
 | H015 | active | 2 | 3 | 5 | +50 | RAVE / AMAF rollout 共有 | vs base MCTS N=30 winrate≥55% | PLAN.md L309 |
-| H016 | active | 3 | 4 | 16 | +100 | Transformer encoder (planets+fleets を token、4-layer/d=64) + NN value head のみ (policy は MCTS visit dist) | vs Phase 2 best N=30 winrate≥55%、LB ≥1100 | PLAN.md L328-334, L349 |
+| H016 | in_progress | 3 | 4 | 16 | +100 | Transformer encoder (planets+fleets を token、4-layer/d=64) + NN value head のみ (policy は MCTS visit dist) | vs Phase 2 best N=30 winrate≥55%、LB ≥1100 | PLAN.md L328-334, L349。**exp/032 で infra step 1 着手 (strategic pivot)**: 8 系統 (eval×3/depth/opponent/fleet/paradigm/rollout) 全て helps-weak/hurts-strong で kill、learned_rules 残候補 (c) eval×sigmoid は提出物 beam に sigmoid 無しで崩壊 → live escape は NN のみ。締切 06-23 (残24日) で着手必須。今 iter は agent 不変・no-submit の +0 基盤 (H021 先例): state→tensor encoder のみ (`src/features/encoder.py`)。実学習/Kaggle GPU は後続 iter |
 | H017 | active | 3 | 4 | 8 | +80 | NN policy prior 追加 (AlphaZero 風 (value, policy_logits) 出力) | vs H016 N=30 winrate≥55% | PLAN.md L350 |
 | H018 | active | 3 | 3 | 6 | +40 | 4-fold symmetry data augmentation (90/180/270° rotation で学習データ 4倍) | 学習収束が 1/4 epoch で同等 loss | PLAN.md B-5 |
 | H019 | active | 4 | 4 | 6 | +80 | 戦況分類 (序盤/中盤/終盤/危機) に基づく dynamic dispatch (NN/MCTS/heuristic 切替) | vs Phase 3 N=30 winrate≥55%、LB ≥1300 | PLAN.md L380-381 |
