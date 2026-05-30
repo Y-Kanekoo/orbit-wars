@@ -16,10 +16,7 @@ from src.strategy.geometry import angle_to, avoidance_angle, distance, fleet_spe
 from src.strategy.targeting import PlanetView, pick_best_target, score_target
 from src.strategy.threat import FleetView, incoming_threat
 
-# H027 (exp/042): noop opponent baseline 上で depth=3 を再検証。過去の depth=3
-# regression (H004/H023) は phase1/argmax opponent model 下の結果で、現 noop
-# regime (_simulate_opponents=noop, H025 で LB +21) では未測定。matrix 空白セル。
-SEARCH_DEPTH = 3
+SEARCH_DEPTH = 2
 BEAM_WIDTH = 16
 ENEMY_CANDIDATES = 3
 NEUTRAL_CANDIDATES = 3
