@@ -540,9 +540,21 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[list[flo
     beam = [initial]
     best_frontier = [_rollout_phase1_baseline(initial, player, SEARCH_DEPTH)]
 
+    def _best_moves_so_far() -> list[list[float]]:
+        # H029 (exp/044) anytime 化: timeout 時も完了済 depth の best_frontier を
+        # 活かす。best_frontier は line `best_frontier = beam` で完全展開後にのみ
+        # 更新されるため、常に「ある depth の完全な beam」を保持し partial state には
+        # ならない。root_actions が空なら phase1 fallback に退避。
+        if not best_frontier:
+            return fallback_moves
+        best_state = max(best_frontier, key=lambda state: _score_state(state, player))
+        if not best_state.root_actions:
+            return fallback_moves
+        return _actions_to_moves(best_state.root_actions) or fallback_moves
+
     for depth in range(SEARCH_DEPTH):
         if time.perf_counter() - started_at > time_budget_sec:
-            return fallback_moves
+            return _best_moves_so_far()
         expanded_states: list[SearchState] = []
         for state in beam:
             expanded = _expand_turn(
@@ -553,7 +565,7 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[list[flo
                 time_budget_sec=time_budget_sec,
             )
             if expanded is None:
-                return fallback_moves
+                return _best_moves_so_far()
             for candidate in expanded:
                 projected = _advance_one_turn(_simulate_opponents(candidate, player))
                 expanded_states.append(projected)
@@ -564,10 +576,4 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[list[flo
         if time.perf_counter() - started_at > time_budget_sec * TIME_GUARD_RATIO:
             break
 
-    if not best_frontier:
-        return fallback_moves
-    best_state = max(best_frontier, key=lambda state: _score_state(state, player))
-    if not best_state.root_actions:
-        return fallback_moves
-    best_moves = _actions_to_moves(best_state.root_actions)
-    return best_moves or fallback_moves
+    return _best_moves_so_far()
