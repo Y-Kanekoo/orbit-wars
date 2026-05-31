@@ -132,6 +132,20 @@ def _eval_vs_opponent(agent: str, opponent: str, n: int, root: str, workers: int
     }
 
 
+def _n_for_opponent(name: str, args) -> int:
+    """相手別の試合数を返す。
+
+    gate の唯一の decision 軸 prev_best (legacy-388 mirror) は同一コードでも N=30 で
+    ±7 試合振れ (`mixeval_prevbest_gate_noisy_misjudges_lb`)、単一測定で gate を両方向に
+    誤判定する。一方 random (0.9667 天井) / nearest_sniper (0.6) は識別力が低く N=30 で足りる。
+    --prev-best-n>0 のとき prev_best のみ高 N で測り、安価な相手は --n-per-opponent 据置。
+    既定 (--prev-best-n=0) は従来どおり全相手一律 (compat 不変)。
+    """
+    if name == "prev_best" and args.prev_best_n > 0:
+        return args.prev_best_n
+    return args.n_per_opponent
+
+
 def _run_mix_eval(args, root: str, workers: int) -> int:
     opp_names = [o.strip() for o in args.opponents.split(",") if o.strip()]
     unknown = [o for o in opp_names if o not in OPPONENT_MAP]
@@ -146,7 +160,7 @@ def _run_mix_eval(args, root: str, workers: int) -> int:
     errors_total = 0
     for name in opp_names:
         opp_path = OPPONENT_MAP[name]
-        res = _eval_vs_opponent(args.agent, opp_path, args.n_per_opponent, root, workers)
+        res = _eval_vs_opponent(args.agent, opp_path, _n_for_opponent(name, args), root, workers)
         per_opp[name] = res
         errors_total += res["errors"]
 
@@ -156,6 +170,7 @@ def _run_mix_eval(args, root: str, workers: int) -> int:
         "mode": "mix_eval",
         "agent": args.agent,
         "n_per_opponent": args.n_per_opponent,
+        "prev_best_n": args.prev_best_n if args.prev_best_n > 0 else args.n_per_opponent,
         "opponents": per_opp,
         "winrate_min": round(winrate_min, 4),
         "errors_total": errors_total,
@@ -216,6 +231,12 @@ def main() -> int:
         help="mix-eval 相手 (カンマ区切り): random,nearest_sniper,prev_best",
     )
     ap.add_argument("--n-per-opponent", type=int, default=30)
+    ap.add_argument(
+        "--prev-best-n",
+        type=int,
+        default=0,
+        help="prev_best (gate decision 軸) のみ高 N で測る override。0 = --n-per-opponent と同一",
+    )
     ap.add_argument(
         "--out", default="", help="mix-eval 結果の出力 path (例: state/last_mix_eval.json)"
     )
