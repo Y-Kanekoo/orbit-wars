@@ -37,7 +37,10 @@ from src.utils import action as _action  # noqa: E402
 from src.utils import telemetry as _tel  # noqa: E402
 from src.utils.timing import Timer  # noqa: E402
 
-_BEAM_TIME_BUDGET_SEC = 0.3
+# H028 (exp/043): actTimeout 1s / main.py deadline 0.90s に対し beam を 0.3s に
+# self-cap していたため dense/late turn で探索が打ち切られ phase1 fallback していた。
+# 利用可能 budget を活かすため 0.3→0.5 に引き上げ (実測 main.agent max 601ms < 950ms CI)。
+_BEAM_TIME_BUDGET_SEC = 0.5
 _MCTS_TIME_BUDGET_SEC = 0.3
 _MCTS_ENABLED = os.environ.get("ORBIT_WARS_MCTS", "0") == "1"
 
