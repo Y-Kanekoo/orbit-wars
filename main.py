@@ -37,10 +37,12 @@ from src.utils import action as _action  # noqa: E402
 from src.utils import telemetry as _tel  # noqa: E402
 from src.utils.timing import Timer  # noqa: E402
 
-# H028 (exp/043): actTimeout 1s / main.py deadline 0.90s に対し beam を 0.3s に
-# self-cap していたため dense/late turn で探索が打ち切られ phase1 fallback していた。
-# 利用可能 budget を活かすため 0.3→0.5 に引き上げ (実測 main.agent max 601ms < 950ms CI)。
-_BEAM_TIME_BUDGET_SEC = 0.5
+# H028 (exp/043) REVERTED: 0.3->0.5 引き上げは LB 401.7 (baseline 435.3 比 -33.6) で
+# regression 確定 (submission 53299379、提出 2026-06-02T17:26Z → 22h で 600.0→401.7 collapse)。
+# H001 territory と同パターン。actTimeout 完全活用は dense turn で beam を深くするが、
+# strong opponent (LB pool) に対し誤った探索深度の overfit が起き helps-weak/hurts-strong
+# パターンを踏襲。frozen 0.3 が load-bearing local opt (exp 044 anytime 診断と整合)。
+_BEAM_TIME_BUDGET_SEC = 0.3
 _MCTS_TIME_BUDGET_SEC = 0.3
 _MCTS_ENABLED = os.environ.get("ORBIT_WARS_MCTS", "0") == "1"
 
