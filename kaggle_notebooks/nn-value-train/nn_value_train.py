@@ -75,8 +75,8 @@ def locate_repo() -> Path:
             if (cand / marker).exists():
                 print(f"[locate_repo] dataset mount で repo 発見: {cand}")
                 return cand
-    # (B) internet 経由 git clone
-    git_url = os.environ.get("ORBIT_WARS_GIT_URL", "")
+    # (B) internet 経由 git clone (public repo のため PAT 不要で default URL を使う、env で上書き可)
+    git_url = os.environ.get("ORBIT_WARS_GIT_URL", "https://github.com/Y-Kanekoo/orbit-wars.git")
     if git_url:
         dest = WORK / "orbit-wars-src"
         if not (dest / marker).exists():
