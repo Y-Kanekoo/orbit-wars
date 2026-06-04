@@ -1,0 +1,13 @@
+{
+  "id": "yukikanek0/orbit-wars-nn-value-data-prev",
+  "title": "orbit-wars-nn-value-data-prev",
+  "code_file": "nn_value_data_prev.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}
