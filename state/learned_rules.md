@@ -106,3 +106,18 @@
   - 統合: 単一 knob kill **11 系統目** (eval×3 / depth / opponent-model / fleet-projection / paradigm-swap MCTS / rollout-policy / sun-avoidance / multi-launch / anytime-beam / **budget-raise**)。Phase 1 beam の局所最適 435.3 を超える escape は Phase 3 NN (H016, supervisor GPU) のみ。
   - 防止策: (1) main.py の `_BEAM_TIME_BUDGET_SEC` を 0.5→0.3 に revert、agent を bit-identical noop baseline (LB 435.3) に戻す。(2) 「compute 供給だけの bit-identical knob」も submit 前に H029 anytime-beam のような diagnostic A/B (matched N=60+ prev_best) を hard requirement にする (supervisor override も例外でない)。
   - 関連: `supervisor_resurrect_against_stale_baseline` (H001 同型 600→394 collapse パターン)、`mixeval_prevbest_gate_noisy_misjudges_lb` (N=30 では分散吸収のため判定不能、N=60+ 必須)、`anytime_beam_no_gain_vs_strong` (事前 de-risk material を override で無視した supervisor 判定ミス)。
+
+- INFO: `kaggle_p100_pytorch_incompat` — H016 cycle 1 (2026-06-04, exp/046) で Kaggle GPU notebook `orbit-wars-nn-value-train` の train 段階で **CUDA error: no kernel image is available for execution on the device**。Kaggle が割り当てた **Tesla P100 (sm_60)** と現 Kaggle image の **PyTorch (sm_70+ のみサポート)** が non-compatible。data-gen (CPU 並列) は完走、train 直前で fail。
+  - 対応 (cycle 1 で実施): data-gen 出力 `value_dataset.npz` (91234 samples, 510 games) を `kaggle kernels output` で local pull、**local CPU で train_value.py + quantize_onnx.py を完走** (M-series ARM、30 epochs ~15min)。INT8 sign_agreement 100%、quantize 結果 main 提出 path から見れば bit-identical な fallback。
+  - 防止策: 次 Kaggle GPU 起動前に kernel-metadata.json で GPU type を明示 (T4/V100)。kaggle CLI の `--gpu-type` 指定可否は要確認、無理なら `enable_gpu: false` で CPU 専用にして data-gen のみ Kaggle、train は local で完結。
+  - 関連: `local_cpu_selfplay_export_infeasible_at_scale` (Kaggle 並列で打開する設計だったが train だけ GPU 依存の脆弱性顕在化)。
+
+- INFO: `nn_value_distribution_shift_legacy388_mirror` — H016 cycle 2-3 (2026-06-04, exp/047, exp/048) で NN value head (val_sign_acc 0.7611, train_acc 0.9663) を beam の `_score_state` env-gated 加算 (`ORBIT_WARS_NN_VALUE_BEAM=1`) して N=30 mix-eval:
+  - cycle 2 (WEIGHT=1.0): random 0.9333 / **sniper 0.6 = baseline tied!** / prev_best **0.4333 (-8g vs baseline 0.7)**
+  - cycle 3 (WEIGHT=0.3 sweep): random 0.9 / sniper 0.6 / prev_best **0.4667 (-7g)** = cycle 2 と差 1g (noise レベル)
+  - **真因**: train data (`export_value_data.py --agent main.py = noop-beam vs noop-beam self-play`) と query (mix-eval で noop-beam vs **legacy-388 mirror**) の **distribution shift**。legacy-388 は noop-beam より強いので「noop-beam が劣勢」な state が多発、NN は劣勢 state 評価が不正確 (train_acc 0.97 vs val_acc 0.76 の 20pt gap も整合)。
+  - weight sweep (w=1.0 vs w=0.3) で差 1g = 効果ほぼ同じ = **weight tuning は dead end**。NN value 自体の質が legacy-388 mirror state に対し不足。
+  - sniper (= competition-starter) では tied (0.6 = baseline) → noop-beam self-play で **soft target distribution は学習できている**が、強敵 legacy-388 への generalization は限定的。
+  - 次手 (cycle 4 候補): **mixed-opponent self-play data 生成** = `export_value_data.py` を legacy-388 戦も含めて再 run、distribution gap を埋める。GPU は P100 incompat (上記) のため T4 指定 or local CPU 30h+ run (締切 18 日との trade-off 要 user 判断)。
+  - 関連: `tournament_noise_from_wallclock_cutoff_under_parallel_load` (cycle 3 で w=1.0 vs w=0.3 の 1g 差は noise floor 内)、`mixeval_prevbest_gate_noisy_misjudges_lb` (cycle 結果は N=60 matched A/B で確証要、ただし N=30 σ=0.089、Δ=0.27 は明白 CI 外)。
+  - 重要 framing (advisor 助言): **NN value を「kill 12 系統目」と framing しない**。MCTS+NN cycle 1 (exp 028 比 sniper 0.20→0.47, prev 0.17→0.33 で 2× 改善) と NN-in-beam cycle 2 (sniper baseline 完全一致) は NN が positive signal を持つ evidence。kill 12 とすると有用な asset を棄却することになる。asset は repo 外 backup 済 (`~/orbit-wars-models/cycle1-2026-06-04/`)、cycle 4 で再利用。
