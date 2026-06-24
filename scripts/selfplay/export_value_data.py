@@ -302,6 +302,16 @@ def export(
         stats["policy_noop_frac"] = float(policy_target[:, MAX_PLANETS].mean())
         stats["policy_row_sum_min"] = float(policy_target.sum(axis=1).min())
         stats["policy_row_sum_max"] = float(policy_target.sum(axis=1).max())
+        # H031 (exp/063): policy collapse の真因切り分け diagnostic。全体 noop_frac が高くても
+        # 大半が「launch 不可 → no-op one-hot」の死 row なら policy head 自体は launch 決定
+        # timestep で学習可能。学習側はこの 2 stat で「dual-head 学習前に死 row を filter/weight
+        # すべきか」を判断する (learned_rules policy_target_noop_collapse_persists_after_index_fix)。
+        launch_mass = policy_target[:, :MAX_PLANETS].sum(axis=1)
+        launch_rows = launch_mass > 1e-6  # MCTS が launch を 1 度でも visit した timestep
+        stats["policy_launch_decision_frac"] = float(launch_rows.mean())
+        stats["policy_noop_frac_launch_only"] = (
+            float(policy_target[launch_rows, MAX_PLANETS].mean()) if launch_rows.any() else 1.0
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_path, **arrays)
