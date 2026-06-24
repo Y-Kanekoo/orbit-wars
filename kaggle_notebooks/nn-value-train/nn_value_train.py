@@ -11,6 +11,15 @@
 #   1. scripts/selfplay/export_value_data.py --workers=<cpu>  (並列 self-play → npz)
 #   2. scripts/nn/train_value.py                              (ValueNet 学習 → .pt + .onnx)
 #   3. scripts/nn/quantize_onnx.py                            (int8 量子化 + CPU latency)
+#
+# === H017 dual-head mode (POLICY=1, exp/065) ===============================
+# 環境変数 POLICY=1 で PolicyValueNet (value + policy prior) の dual-head 学習に
+# 切替: stage1 export が --policy-budget で MCTS visit policy_target を記録、
+# stage2 train が --policy で value MSE + launch-row policy CE (H032: 死 row 除外)
+# を学習。stage3 quantize は value 出力名指しで dual-head ONNX も無改修で動作。
+# 既定 (POLICY=0) は従来 H016 value-only path で完全不変。
+# 注意: policy_target は per-timestep に POLICY_BUDGET 秒の MCTS search を足すため
+# data-gen が value-only より重い。first-signal は GAMES_PER_OPPONENT を下げて短縮。
 # 成果物は /kaggle/working に出力し、"Save Version" で Kaggle dataset 化 →
 # 次の MCTS 統合 iter で `value_net.int8.onnx` を ORBIT_WARS_NN_VALUE_MODEL に差す。
 #
@@ -51,6 +60,13 @@ EPOCHS = int(os.environ.get("EPOCHS", "40"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "256"))
 WORKERS = int(os.environ.get("WORKERS", str(os.cpu_count() or 4)))
 APPEND_NPZ = os.environ.get("APPEND_NPZ", "")  # 既存 dataset npz を継ぎ足す場合の path
+# H017 dual-head (PolicyValueNet): POLICY=1 で stage1 に policy_target export、
+# stage2 を dual-head 学習 (value MSE + launch-row policy CE) に切替。既定 OFF =
+# 従来 H016 value-only path で完全不変。
+POLICY = os.environ.get("POLICY", "0") == "1"
+# policy_target は各 timestep で MCTS visit 探索を回すため value-only より重い
+# (per-timestep ~POLICY_BUDGET 秒の追加 search)。first-signal は小 budget で十分。
+POLICY_BUDGET = float(os.environ.get("POLICY_BUDGET", "0.1"))
 
 WORK = Path("/kaggle/working")
 DATA_NPZ = WORK / "value_dataset.npz"
@@ -129,45 +145,47 @@ def main() -> int:
 
     # --- stage 1: 並列 self-play data-gen ---
     t = time.time()
-    run(
-        [
-            sys.executable,
-            "scripts/selfplay/export_value_data.py",
-            "--agent",
-            "main.py",
-            "--opponents",
-            OPPONENTS,
-            "--games-per-opponent",
-            str(GAMES_PER_OPPONENT),
-            "--stride",
-            str(STRIDE),
-            "--workers",
-            str(WORKERS),
-            "--out",
-            str(DATA_NPZ),
-        ],
-        cwd=repo,
-    )
+    export_cmd = [
+        sys.executable,
+        "scripts/selfplay/export_value_data.py",
+        "--agent",
+        "main.py",
+        "--opponents",
+        OPPONENTS,
+        "--games-per-opponent",
+        str(GAMES_PER_OPPONENT),
+        "--stride",
+        str(STRIDE),
+        "--workers",
+        str(WORKERS),
+        "--out",
+        str(DATA_NPZ),
+    ]
+    if POLICY:
+        # H017: 各 timestep の MCTS visit policy target を npz key policy_target に記録
+        export_cmd += ["--policy-budget", str(POLICY_BUDGET)]
+    run(export_cmd, cwd=repo)
     timings["export_s"] = round(time.time() - t, 1)
     merge_append(repo)
 
-    # --- stage 2: ValueNet 学習 → torch ckpt + ONNX ---
+    # --- stage 2: 学習 → torch ckpt + ONNX (POLICY 時は PolicyValueNet dual-head) ---
     t = time.time()
-    run(
-        [
-            sys.executable,
-            "scripts/nn/train_value.py",
-            "--data",
-            str(DATA_NPZ),
-            "--epochs",
-            str(EPOCHS),
-            "--batch-size",
-            str(BATCH_SIZE),
-            "--out",
-            str(CKPT),
-        ],
-        cwd=repo,
-    )
+    train_cmd = [
+        sys.executable,
+        "scripts/nn/train_value.py",
+        "--data",
+        str(DATA_NPZ),
+        "--epochs",
+        str(EPOCHS),
+        "--batch-size",
+        str(BATCH_SIZE),
+        "--out",
+        str(CKPT),
+    ]
+    if POLICY:
+        # H017: dual head (value MSE + launch-row policy CE、H032 で死 row は CE 除外が既定)
+        train_cmd += ["--policy"]
+    run(train_cmd, cwd=repo)
     timings["train_s"] = round(time.time() - t, 1)
 
     # --- stage 3: int8 量子化 + CPU latency (提出は CPU 1秒/turn 制約下) ---
@@ -187,15 +205,24 @@ def main() -> int:
 
     n_games = GAMES_PER_OPPONENT * len(OPPONENTS.split(","))
     print(
-        f"\n[DONE] workers={WORKERS} games≈{n_games} timings={timings} "
+        f"\n[DONE] mode={'dual-head(H017)' if POLICY else 'value-only(H016)'} "
+        f"workers={WORKERS} games≈{n_games} timings={timings} "
         f"per_game≈{round(timings['export_s']/max(n_games,1),1)}s "
         f"outputs={sorted(p.name for p in WORK.glob('value_net*'))}"
     )
-    print(
-        "次 iter: value_net.int8.onnx を dataset 化 → ORBIT_WARS_NN_VALUE=1 + "
-        "ORBIT_WARS_NN_VALUE_MODEL=<path> で mix-eval し strong-opponent regression が "
-        "baseline 付近に戻るか測定 (H016 コア signal)。"
-    )
+    if POLICY:
+        print(
+            "次 iter (H017): value_net.int8.onnx を dataset 化 → ORBIT_WARS_MCTS=1 + "
+            "ORBIT_WARS_NN_POLICY=1 ORBIT_WARS_NN_POLICY_MODEL=<path> (+ NN value leaf) で "
+            "NN-in-MCTS の PUCT prior を有効化し strong-opponent winrate eval "
+            "(`nn_in_mcts_leaf_local_eval_infeasible_in_harness` ゆえ Kaggle 側 self-play eval)。"
+        )
+    else:
+        print(
+            "次 iter: value_net.int8.onnx を dataset 化 → ORBIT_WARS_NN_VALUE=1 + "
+            "ORBIT_WARS_NN_VALUE_MODEL=<path> で mix-eval し strong-opponent regression が "
+            "baseline 付近に戻るか測定 (H016 コア signal)。"
+        )
     return 0
 
 
