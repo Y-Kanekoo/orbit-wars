@@ -2,7 +2,7 @@
   "mode": "mix_eval",
   "agent": "main.py",
   "n_per_opponent": 30,
-  "prev_best_n": 100,
+  "prev_best_n": 30,
   "opponents": {
     "random": {
       "opponent": "random",
@@ -26,17 +26,17 @@
     },
     "prev_best": {
       "opponent": "docs/competition/legacy-388/main.py",
-      "n": 100,
-      "valid_games": 100,
-      "wins": 51,
-      "losses": 49,
+      "n": 30,
+      "valid_games": 30,
+      "wins": 15,
+      "losses": 15,
       "errors": 0,
       "crash_suspects": 0,
-      "winrate": 0.51
+      "winrate": 0.5
     }
   },
-  "winrate_min": 0.51,
+  "winrate_min": 0.5,
   "errors_total": 0,
-  "measured_at": "2026-05-31T03:10:56Z",
+  "measured_at": "2026-06-24T06:11:38Z",
   "workers": 7
 }
