@@ -191,6 +191,9 @@ def _aggregate(jsonl_path: Path, opponents: list[str], n_per_opp: int) -> dict:
             "ORBIT_WARS_NN_VALUE": os.environ.get("ORBIT_WARS_NN_VALUE", ""),
             "ORBIT_WARS_NN_VALUE_MODEL": os.environ.get("ORBIT_WARS_NN_VALUE_MODEL", ""),
             "ORBIT_WARS_NN_POLICY": os.environ.get("ORBIT_WARS_NN_POLICY", ""),
+            # H017 dual-head eval の model lineage 追跡用 (どの policy model がこの winrate を
+            # 出したかを summary だけで辿れるようにする。欠落すると model 取り違えで誤判定)。
+            "ORBIT_WARS_NN_POLICY_MODEL": os.environ.get("ORBIT_WARS_NN_POLICY_MODEL", ""),
         },
         "measured_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
