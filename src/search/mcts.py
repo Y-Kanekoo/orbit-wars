@@ -38,6 +38,10 @@ from src.search.beam import (
 
 ROLLOUT_DEPTH = 2
 UCB_C = 1.4
+# H017 (exp/060) PUCT exploration 係数 (AlphaZero 慣習 c_puct ~1-2)。policy prior が
+# 有効な時 UCB1 を PUCT に切替え、root children の value-tie (learned_rules
+# mcts_progressive_widening_inert_small_branching 等) を prior で割る。
+PUCT_C = 1.5
 SIGMOID_SCALE = 100.0
 TIME_GUARD_RATIO = 0.85
 
@@ -114,6 +118,39 @@ def _nn_leaf_value(state: SearchState, player: int, model, ctx) -> float:
     return (v + 1.0) / 2.0
 
 
+# H017 (exp/060): root の PUCT prior を NN policy head から供給する env flag
+# (default OFF = 提出 parity)。ORBIT_WARS_NN_POLICY=1 + ORBIT_WARS_NN_POLICY_MODEL=<onnx>
+# で有効。実モデルは Kaggle GPU 学習後に差す (local export 不能、supervisor escalate)。
+_POLICY_MODEL = None  # lazy cache (PolicyValueModel | None)
+_POLICY_MODEL_RESOLVED = False
+
+
+def reset_policy_model() -> None:
+    """env を再読込させるため policy model cache をクリアする (smoke / test 用)。"""
+    global _POLICY_MODEL, _POLICY_MODEL_RESOLVED
+    _POLICY_MODEL = None
+    _POLICY_MODEL_RESOLVED = False
+
+
+def _get_policy_model():
+    """env flag に従い NN policy model を解決 (なければ None = UCB1 経路)。"""
+    global _POLICY_MODEL, _POLICY_MODEL_RESOLVED
+    if _POLICY_MODEL_RESOLVED:
+        return _POLICY_MODEL
+    _POLICY_MODEL_RESOLVED = True
+    if os.environ.get("ORBIT_WARS_NN_POLICY") != "1":
+        _POLICY_MODEL = None
+        return None
+    model_path = os.environ.get("ORBIT_WARS_NN_POLICY_MODEL", "")
+    if not model_path or not os.path.exists(model_path):
+        _POLICY_MODEL = None  # path 未指定/不在は安全に UCB1 fallback
+        return None
+    from src.nn.value_infer import PolicyValueModel
+
+    _POLICY_MODEL = PolicyValueModel(model_path)
+    return _POLICY_MODEL
+
+
 @dataclass(slots=True)
 class MCTSNode:
     state: SearchState
@@ -121,6 +158,7 @@ class MCTSNode:
     children: list[MCTSNode] = field(default_factory=list)
     visits: int = 0
     value_sum: float = 0.0
+    prior: float = 0.0  # H017 PUCT prior (policy 有効時のみ意味を持つ)
 
 
 def _ucb1(child: MCTSNode, parent_visits: int) -> float:
@@ -129,6 +167,65 @@ def _ucb1(child: MCTSNode, parent_visits: int) -> float:
     exploit = child.value_sum / child.visits
     explore = UCB_C * math.sqrt(math.log(max(parent_visits, 1)) / child.visits)
     return exploit + explore
+
+
+def _puct(child: MCTSNode, parent_visits: int, c_puct: float) -> float:
+    """PUCT score = Q + c_puct * P * sqrt(ΣN) / (1 + N_child)。
+
+    UCB1 と違い未訪問 child を inf にせず、prior P で初期探索順序を決める (AlphaZero)。
+    parent_visits=0 でも prior が効くよう sqrt(max(ΣN, 1)) とする。
+    """
+    exploit = child.value_sum / child.visits if child.visits else 0.0
+    explore = c_puct * child.prior * math.sqrt(max(parent_visits, 1)) / (1 + child.visits)
+    return exploit + explore
+
+
+def _assign_child_priors(
+    root: MCTSNode, initial: SearchState, player: int, policy_model, nn_ctx
+) -> None:
+    """root state の NN policy で各 child に prior を割当てる (総和 1 に正規化)。
+
+    policy index 規約 (train/serve skew 回避、train_value.py と 1:1):
+      i ∈ [0, MAX_PLANETS) = encoder の planet slot i (= ships 降順 sort の i 番目)
+      i = MAX_PLANETS = no-op (launch しない)
+    各 child の prior は、その root_actions の launch 元 planet の policy prob を平均
+    (launch 無し child は no-op prob)。launch 元が encoder の上位 MAX_PLANETS から
+    truncate された稀ケースは no-op prob で代替する。
+    """
+    import numpy as np
+
+    from src.features.encoder import MAX_PLANETS
+    from src.nn.value_infer import encode_search_state
+
+    enc = encode_search_state(initial.planets, initial.fleets, player, nn_ctx)
+    _, logits = policy_model.evaluate(enc)  # (POLICY_DIM,)
+    exp = np.exp(logits - logits.max())
+    probs = [float(p) for p in (exp / exp.sum())]
+    noop_idx = MAX_PLANETS
+
+    # encoder と同一 sort (ships 降順, 上位 MAX_PLANETS) で planet.id -> slot を再構築
+    sorted_planets = sorted(initial.planets, key=lambda p: p.ships, reverse=True)[:MAX_PLANETS]
+    id_to_slot = {p.id: i for i, p in enumerate(sorted_planets)}
+
+    raw: list[float] = []
+    for child in root.children:
+        sources = [
+            a.source_id for a in child.state.root_actions if a.target_id is not None and a.ships > 0
+        ]
+        slots = [id_to_slot[s] for s in sources if s in id_to_slot]
+        if slots:
+            raw.append(sum(probs[i] for i in slots) / len(slots))
+        else:
+            raw.append(probs[noop_idx])
+
+    total = sum(raw)
+    if total <= 0.0:
+        uniform = 1.0 / len(root.children)
+        for child in root.children:
+            child.prior = uniform
+        return
+    for child, r in zip(root.children, raw, strict=True):
+        child.prior = r / total
 
 
 def _uniform_decisions(state: SearchState, player: int) -> list:
@@ -206,15 +303,23 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
     if not root.children:
         return fallback_moves
 
-    # H016 step 6: NN value head が有効なら leaf 評価を rollout から差し替える。
-    # ctx (comet/angular_velocity/overage) は root obs から 1 度だけ parse して thread。
+    # H016 step 6 / H017 (exp/060): NN value / policy head が有効なら leaf 評価 (value) /
+    # root prior (policy) を NN に差し替える。ctx (comet/angular_velocity/overage) は
+    # root obs から 1 度だけ parse して探索ホライズン中 thread する。
     value_model = _get_value_model()
+    policy_model = _get_policy_model()
     nn_ctx = None
-    if value_model is not None:
+    if value_model is not None or policy_model is not None:
         from src.nn.value_infer import context_from_observation
         from src.utils.observation import parse
 
         nn_ctx = context_from_observation(parse(obs))
+
+    # H017 (exp/060): policy 有効時のみ root child に PUCT prior を割当て、選択を
+    # UCB1 → PUCT に切替える (value-tie を prior で割る)。policy OFF では従来 UCB1。
+    use_puct = policy_model is not None
+    if use_puct:
+        _assign_child_priors(root, initial, player, policy_model, nn_ctx)
 
     # H012 (exp/051) progressive widening: prior 上位 child から段階解禁し、予算少時に
     # visit が全 child へ薄く分散する症状 (learned_rules MCTS root-only) を抑える。
@@ -232,7 +337,10 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
             candidates = root.children[:allowed]
         else:
             candidates = root.children
-        chosen = max(candidates, key=lambda c: _ucb1(c, root.visits))
+        if use_puct:
+            chosen = max(candidates, key=lambda c: _puct(c, root.visits, PUCT_C))
+        else:
+            chosen = max(candidates, key=lambda c: _ucb1(c, root.visits))
         if value_model is not None:
             value = _nn_leaf_value(chosen.state, player, value_model, nn_ctx)
         else:
@@ -249,3 +357,54 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
         ),
     )
     return _actions_to_moves(best.state.root_actions)
+
+
+def debug_root_priors(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[float]:
+    """root child の PUCT prior 一覧を返す (policy 配線契約の smoke/diagnostic 用)。
+
+    探索は回さず root 展開 + prior 割当のみ実施。policy model 未設定 (env OFF) なら []。
+    """
+    policy_model = _get_policy_model()
+    if policy_model is None:
+        return []
+
+    parsed_player, raw_planets, raw_fleets, step = _parse_obs(obs)
+    if player != parsed_player:
+        player = parsed_player
+    initial = SearchState(
+        planets=[ProjectedPlanet.from_raw(p) for p in raw_planets],
+        fleets=[
+            ProjectedFleet(
+                owner=int(f[1]),
+                x=float(f[2]),
+                y=float(f[3]),
+                angle=float(f[4]),
+                ships=int(f[6]),
+                source_planet_id=int(f[5]),
+                target_planet_id=-1,
+                turns_remaining=99,
+            )
+            for f in raw_fleets
+        ],
+        step=step,
+    )
+    started_at = time.perf_counter()
+    expanded = _expand_turn(
+        initial, player, root_depth=True, started_at=started_at, time_budget_sec=time_budget_sec
+    )
+    if not expanded:
+        return []
+    root = MCTSNode(state=initial)
+    for child_state in expanded:
+        child_after_turn = _advance_one_turn(_simulate_opponents(child_state, player))
+        child_after_turn.root_actions = child_state.root_actions
+        root.children.append(MCTSNode(state=child_after_turn, parent=root))
+    if not root.children:
+        return []
+
+    from src.nn.value_infer import context_from_observation
+    from src.utils.observation import parse
+
+    nn_ctx = context_from_observation(parse(obs))
+    _assign_child_priors(root, initial, player, policy_model, nn_ctx)
+    return [c.prior for c in root.children]
