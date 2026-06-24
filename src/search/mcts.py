@@ -48,6 +48,26 @@ ROLLOUT_POLICY = os.environ.get("ROLLOUT_POLICY", "phase1")
 # rollout 用 RNG (seed 固定で決定論的、連続 draw で Monte Carlo 多様性を確保)。
 _ROLLOUT_RNG = random.Random(0xC0FFEE)
 
+
+def _pw_k() -> float:
+    """H012 (exp/051) progressive widening 係数。0 (default) = 無効 = exp028 parity。
+
+    env で都度読む (test/diagnostic が monkeypatch せず env 切替で A/B できるよう module
+    定数化しない)。値が >0 のとき root child の active 集合を prior 上位から段階解禁する。
+    """
+    try:
+        return float(os.environ.get("MCTS_PW_K", "0"))
+    except ValueError:
+        return 0.0
+
+
+def _pw_alpha() -> float:
+    try:
+        return float(os.environ.get("MCTS_PW_ALPHA", "0.5"))
+    except ValueError:
+        return 0.5
+
+
 # H016 step 6: leaf 評価を NN value head に差し替える env flag (default OFF = 提出 parity)。
 # ORBIT_WARS_NN_VALUE=1 + ORBIT_WARS_NN_VALUE_MODEL=<onnx path> で有効。実モデルは
 # Kaggle GPU 学習後に差す (local export は ~74s/game で非現実、supervisor escalate)。
@@ -196,9 +216,23 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
 
         nn_ctx = context_from_observation(parse(obs))
 
+    # H012 (exp/051) progressive widening: prior 上位 child から段階解禁し、予算少時に
+    # visit が全 child へ薄く分散する症状 (learned_rules MCTS root-only) を抑える。
+    # pw_k=0 (default) では全 child を従来どおり candidate とし exp028 と完全 parity。
+    pw_k = _pw_k()
+    if pw_k > 0.0:
+        # prior = 1 turn 進めた child state の `_score_state` (player 視点、高=有望)。
+        root.children.sort(key=lambda c: _score_state(c.state, player), reverse=True)
+    pw_alpha = _pw_alpha()
+
     deadline = started_at + time_budget_sec * TIME_GUARD_RATIO
     while time.perf_counter() < deadline:
-        chosen = max(root.children, key=lambda c: _ucb1(c, root.visits))
+        if pw_k > 0.0:
+            allowed = max(1, math.ceil(pw_k * (root.visits**pw_alpha)))
+            candidates = root.children[:allowed]
+        else:
+            candidates = root.children
+        chosen = max(candidates, key=lambda c: _ucb1(c, root.visits))
         if value_model is not None:
             value = _nn_leaf_value(chosen.state, player, value_model, nn_ctx)
         else:
