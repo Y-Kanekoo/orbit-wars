@@ -50,6 +50,33 @@ INPUT_NAMES = [
 ]
 
 
+def _select_device() -> torch.device:
+    """実際に CUDA カーネルが動くか probe して学習 device を選ぶ。
+
+    `kaggle_p100_pytorch_incompat` 対策: Kaggle が割り当てる Tesla P100 (sm_60) は
+    現行 Kaggle PyTorch image (sm_70+ のみサポート) と非互換で、`torch.cuda.is_available()`
+    は True を返すが最初の CUDA カーネル実行で「no kernel image is available for
+    execution on the device」を raise する。data-gen (~2.5h) 完了後に train 段で初めて
+    落ちると GPU quota を丸ごと無駄にする (cycle 1/exp046 で実際に発生)。ここで tiny
+    tensor を CUDA 上で実演算して生存を確認し、失敗時は CPU に自動 fallback する
+    (210K param / 40 epoch は CPU でも ~15min で実用域、cycle 1 で実証済)。
+    """
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
+    try:
+        # sm_60 非互換は is_available() を通過し、実カーネル実行で初めて raise する
+        probe = torch.zeros(1, device="cuda")
+        _ = float((probe + 1).sum().item())
+        return torch.device("cuda")
+    except Exception as exc:  # noqa: BLE001 - CUDA error 種別を問わず CPU fallback
+        print(
+            f"[device] CUDA probe 失敗 ({type(exc).__name__}: {exc}) → CPU に fallback "
+            "(kaggle_p100_pytorch_incompat 対策、data-gen 済 quota の浪費を防ぐ)。",
+            flush=True,
+        )
+        return torch.device("cpu")
+
+
 def _grouped_split(
     game_id: np.ndarray, val_frac: float, seed: int
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -187,7 +214,7 @@ def train(
     game の全回転は同じ side に留まり train/val leakage は起きない。
     """
     torch.manual_seed(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _select_device()
 
     game_id = np.asarray(data["game_id"])
     train_idx, val_idx = _grouped_split(game_id, val_frac, seed)
@@ -433,7 +460,7 @@ def train_pv(
             "policy_target が dataset に無い (PolicyValueNet 学習には visit 分布 target が必要)"
         )
     torch.manual_seed(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _select_device()
 
     game_id = np.asarray(data["game_id"])
     train_idx, val_idx = _grouped_split(game_id, val_frac, seed)
