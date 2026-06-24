@@ -271,18 +271,41 @@ def train(
 # value/policy の混合比 (AlphaZero 慣習: 両 loss を同オーダで加算)。
 DEFAULT_POLICY_WEIGHT = 1.0
 
+# launch 決定 timestep の判定閾値。policy_target の launch slot (= no-op を除く
+# [0, MAX_PLANETS) slot) に乗った確率質量がこの値を超える row を「MCTS が launch を
+# 1 度でも visit した launch 決定 row」とみなす。exporter (export_value_data.py
+# `policy_launch_decision_frac`, exp/063) と同一定義で train/serve 整合 (skew ゼロ)。
+LAUNCH_MASS_EPS = 1e-6
+
 PV_INPUT_NAMES = INPUT_NAMES  # forward の入力署名は value-only と共通
 
 
-def _policy_cross_entropy(logits: Tensor, target: Tensor) -> Tensor:
-    """masked policy logit に対する soft-target cross-entropy (= KL + target entropy)。
+def _policy_ce_per_sample(logits: Tensor, target: Tensor) -> Tensor:
+    """masked policy logit に対する soft-target cross-entropy を **per-sample** で返す。
 
     target は確率分布 (行和 1)。padding slot の target は 0 ゆえ、model 側で _MASK_NEG
     (有限大負値) に詰められた logit の log_softmax (有限) と 0 を掛けて寄与 0 になる
-    (-inf を使わないため NaN は発生しない)。
+    (-inf を使わないため NaN は発生しない)。戻り値 shape (B,)。
     """
     log_probs = torch.log_softmax(logits, dim=1)  # (B, POLICY_DIM)
-    return -(target * log_probs).sum(dim=1).mean()
+    return -(target * log_probs).sum(dim=1)  # (B,)
+
+
+def _policy_cross_entropy(logits: Tensor, target: Tensor) -> Tensor:
+    """全 row 平均の soft-target cross-entropy (per-sample 版の mean、後方互換)。"""
+    return _policy_ce_per_sample(logits, target).mean()
+
+
+def _launch_row_mask(policy_target: Tensor) -> Tensor:
+    """launch 決定 row (no-op を除く slot に質量がある row) の bool mask (B,) を返す。
+
+    H032 (exp/064): 死 row (launch 候補が無く no-op one-hot に collapse した timestep) を
+    policy CE から除外するための mask。noop slot (= 末尾 index) を除いた launch slot
+    `[0, POLICY_DIM-1)` の質量和が `LAUNCH_MASS_EPS` を超える row を launch 決定とみなす
+    (exporter `policy_launch_decision_frac` と同一定義)。
+    """
+    launch_mass = policy_target[:, : POLICY_DIM - 1].sum(dim=1)  # no-op slot を除外
+    return launch_mass > LAUNCH_MASS_EPS
 
 
 def _epoch_pv(
@@ -292,8 +315,19 @@ def _epoch_pv(
     policy_weight: float,
     optimizer: torch.optim.Optimizer | None,
     rng: np.random.Generator,
-) -> tuple[float, float, float]:
-    """PV 1 epoch。optimizer=None で eval。(mean_total_loss, value_sign_acc, mean_policy_ce)。"""
+    policy_launch_only: bool = True,
+) -> tuple[float, float, float, float]:
+    """PV 1 epoch。optimizer=None で eval。
+
+    policy_launch_only=True (既定) で policy cross-entropy を **launch 決定 row のみ**で
+    計算する (H032/exp064)。死 row (no-op one-hot に collapse した timestep) を CE から
+    除外し、policy head が ~70% の trivial no-op 行に支配されて collapse するのを防ぐ
+    (learned_rules `policy_target_noop_collapse_persists_after_index_fix`)。value MSE は
+    全 row で計算する (MC-outcome value は死 row でも valid な学習信号)。
+
+    戻り値 (mean_total_loss, value_sign_acc, mean_policy_ce_over_launch_rows, launch_frac)。
+    mean_policy_ce は launch row のみの平均 (除外 row は含めない honest な値)。
+    """
     n = tensors["value"].shape[0]
     order = np.arange(n)
     train = optimizer is not None
@@ -302,7 +336,8 @@ def _epoch_pv(
     model.train(train)
 
     total_loss = 0.0
-    total_pce = 0.0
+    pce_sum = 0.0  # launch row 上の CE 総和 (報告用)
+    launch_rows = 0  # CE に寄与した launch row 数
     correct = 0
     counted = 0
     value_loss_fn = nn.MSELoss()
@@ -315,22 +350,32 @@ def _epoch_pv(
             p_target = tensors["policy_target"][sel]
             v_pred, p_logits = model(**batch)
             v_loss = value_loss_fn(v_pred, v_target)
-            p_ce = _policy_cross_entropy(p_logits, p_target)
+
+            ce_per = _policy_ce_per_sample(p_logits, p_target)  # (B,)
+            if policy_launch_only:
+                keep = _launch_row_mask(p_target).to(ce_per.dtype)  # (B,) 1.0/0.0
+            else:
+                keep = torch.ones_like(ce_per)
+            n_keep = keep.sum()
+            # launch row が 0 の batch は policy CE 0 (gradient 無し、value loss は流れる)
+            p_ce = (ce_per * keep).sum() / torch.clamp(n_keep, min=1.0)
             loss = v_loss + policy_weight * p_ce
             if train:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
             total_loss += float(loss) * len(sel)
-            total_pce += float(p_ce) * len(sel)
+            pce_sum += float((ce_per.detach() * keep).sum())
+            launch_rows += int(n_keep)
             nz = v_target != 0
             if nz.any():
                 correct += int(((v_pred[nz] > 0) == (v_target[nz] > 0)).sum())
                 counted += int(nz.sum())
     mean_loss = total_loss / max(1, n)
-    mean_pce = total_pce / max(1, n)
+    mean_pce = pce_sum / max(1, launch_rows)
+    launch_frac = launch_rows / max(1, n)
     sign_acc = correct / counted if counted else float("nan")
-    return mean_loss, sign_acc, mean_pce
+    return mean_loss, sign_acc, mean_pce, launch_frac
 
 
 def export_onnx_pv(
@@ -372,11 +417,16 @@ def train_pv(
     seed: int,
     out_prefix: Path,
     policy_weight: float = DEFAULT_POLICY_WEIGHT,
+    policy_launch_only: bool = True,
 ) -> dict:
     """value+policy dataset から PolicyValueNet を学習し checkpoint + dual ONNX を書き出す。
 
     grouped split は ValueNet path と同一 (game 単位で leakage 回避)。augment は policy
     target の planet index 置換が必要なため本 step では非対応 (将来 step)。
+
+    policy_launch_only=True (既定、H032/exp064) で policy CE を launch 決定 row のみで
+    計算する (死 row collapse 回避、value MSE は全 row)。報告 stat `policy_launch_frac`
+    で GPU 学習が data 品質 (launch row 割合) を honest 監視できる。
     """
     if "policy_target" not in data:
         raise KeyError(
@@ -406,16 +456,18 @@ def train_pv(
     last_va_acc = float("nan")
     first_pce = last_pce = float("nan")
     val_pce = float("nan")
+    train_launch_frac = float("nan")
+    val_launch_frac = float("nan")
     for ep in range(epochs):
-        tr_loss, last_tr_acc, tr_pce = _epoch_pv(
-            model, train_t, batch_size, policy_weight, optimizer, rng
+        tr_loss, last_tr_acc, tr_pce, train_launch_frac = _epoch_pv(
+            model, train_t, batch_size, policy_weight, optimizer, rng, policy_launch_only
         )
         if ep == 0:
             first_pce = tr_pce
         last_pce = tr_pce
         if val_t is not None:
-            va_loss, last_va_acc, val_pce = _epoch_pv(
-                model, val_t, batch_size, policy_weight, None, rng
+            va_loss, last_va_acc, val_pce, val_launch_frac = _epoch_pv(
+                model, val_t, batch_size, policy_weight, None, rng, policy_launch_only
             )
         else:
             va_loss = float("nan")
@@ -441,6 +493,9 @@ def train_pv(
     return {
         "model": "PolicyValueNet",
         "policy_weight": policy_weight,
+        "policy_launch_only": bool(policy_launch_only),
+        "policy_launch_frac": round(train_launch_frac, 4),
+        "val_policy_launch_frac": round(val_launch_frac, 4) if val_t is not None else None,
         "n_train": int(train_t["value"].shape[0]),
         "n_val": int(len(val_idx)),
         "n_games": int(np.unique(game_id).size),
@@ -572,11 +627,74 @@ def _smoke_pv() -> None:
         assert (
             stats["onnx_policy_max_diff"] < 1e-2
         ), f"ONNX policy 不一致: {stats['onnx_policy_max_diff']}"
+    # クリーン data (全 row が launch 決定) では launch-only filter は何も除外しない
+    assert stats["policy_launch_only"] is True
+    assert (
+        abs(stats["policy_launch_frac"] - 1.0) < 1e-6
+    ), f"launch row のみのはずが除外発生: {stats['policy_launch_frac']}"
     print(
         f"  PolicyValueNet OK: combined loss {stats['train_loss_first']:.4f} -> "
         f"{stats['train_loss_last']:.4f}, policy CE {stats['train_policy_ce_first']:.4f} -> "
-        f"{stats['train_policy_ce_last']:.4f}, params {stats['params']:,}, "
+        f"{stats['train_policy_ce_last']:.4f}, launch_frac {stats['policy_launch_frac']}, "
+        f"params {stats['params']:,}, "
         f"ONNX v/p diff {stats['onnx_value_max_diff']:.2e}/{stats['onnx_policy_max_diff']:.2e}"
+    )
+
+    # H032 (exp/064): 死 row (no-op one-hot に collapse した timestep) を半数注入し、
+    # launch-only filter が CE から死 row を除外することを検証する。
+    import math
+
+    data2 = _make_synthetic(n_games=8, per_game=12, seed=1, with_policy=True)
+    n_rows2 = data2["policy_target"].shape[0]
+    dead = np.zeros((POLICY_DIM,), dtype=np.float32)
+    dead[MAX_PLANETS] = 1.0  # no-op one-hot = 死 row
+    kill = np.arange(n_rows2) % 2 == 0
+    data2 = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in data2.items()}
+    data2["policy_target"][kill] = dead
+    with tempfile.TemporaryDirectory() as tmp:
+        # 既定 (launch-only): 死 row は CE から除外され launch_frac は厳密に < 1
+        s_lo = train_pv(
+            data2,
+            epochs=50,
+            batch_size=32,
+            lr=1e-3,
+            val_frac=0.25,
+            seed=0,
+            out_prefix=Path(tmp) / "pv_launch_only",
+            policy_launch_only=True,
+        )
+        # all-rows (diagnostic): 死 row も CE に含めるため launch_frac == 1
+        s_all = train_pv(
+            data2,
+            epochs=50,
+            batch_size=32,
+            lr=1e-3,
+            val_frac=0.25,
+            seed=0,
+            out_prefix=Path(tmp) / "pv_all_rows",
+            policy_launch_only=False,
+        )
+    # 死 row が ~半数 → launch-only は除外して launch_frac < 1、all-rows は 1.0
+    assert (
+        0.3 < s_lo["policy_launch_frac"] < 0.7
+    ), f"死 row 除外後の launch_frac が想定外: {s_lo['policy_launch_frac']}"
+    assert (
+        abs(s_all["policy_launch_frac"] - 1.0) < 1e-6
+    ), f"all-rows mode で除外が発生: {s_all['policy_launch_frac']}"
+    # launch-only は launch row の真 distribution を学習 (CE は uniform 上限 log(POLICY_DIM)
+    # を明確に下回る = collapse していない)。報告 CE は launch row 上の honest 平均。
+    uniform_ce = math.log(POLICY_DIM)
+    assert (
+        s_lo["train_policy_ce_last"] < uniform_ce * 0.85
+    ), f"launch-only で policy が launch 信号を学習できず: {s_lo['train_policy_ce_last']} (uniform {uniform_ce:.3f})"
+    assert (
+        s_lo["train_policy_ce_last"] < s_lo["train_policy_ce_first"]
+    ), "launch-only で policy CE が減少せず"
+    print(
+        f"  launch-only filter OK: 死 row 半数注入 → launch_frac "
+        f"launch_only={s_lo['policy_launch_frac']} / all_rows={s_all['policy_launch_frac']}, "
+        f"launch-row CE {s_lo['train_policy_ce_first']:.4f} -> {s_lo['train_policy_ce_last']:.4f} "
+        f"(uniform 上限 {uniform_ce:.3f})"
     )
 
 
@@ -679,6 +797,12 @@ def main() -> int:
         help="policy CE の混合比 (--policy 時のみ)",
     )
     ap.add_argument(
+        "--policy-all-rows",
+        action="store_true",
+        help="policy CE を死 row 含む全 row で計算 (既定は launch 決定 row のみ、H032)。"
+        "diagnostic 用 — 既定 OFF を推奨 (死 row で policy head が collapse する)",
+    )
+    ap.add_argument(
         "--smoke",
         action="store_true",
         help="tiny synthetic data で grouped split・学習収束・ONNX round-trip を検証 (書き出しは tmp)",
@@ -704,6 +828,7 @@ def main() -> int:
             seed=args.seed,
             out_prefix=out_prefix,
             policy_weight=args.policy_weight,
+            policy_launch_only=not args.policy_all_rows,
         )
     else:
         stats = train(
