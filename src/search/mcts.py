@@ -255,8 +255,16 @@ def _rollout_value(state: SearchState, player: int) -> float:
     return 1.0 / (1.0 + math.exp(-score / SIGMOID_SCALE))
 
 
-def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[float]]:
-    """MCTS による 1 ターン分の moves。budget 内で root child を visit-count 選択。"""
+def _search_root(
+    obs: Any, player: int, time_budget_sec: float
+) -> tuple[int, SearchState, MCTSNode | None]:
+    """MCTS を実行し探索済 root node を返す (展開不可なら root=None)。
+
+    `search()` (move 選択) と `search_root_visit_policy()` (policy target 抽出) で
+    本体を共有するための抽出 (exp/061)。返り値は (補正済 player, initial state, root)。
+    root=None は budget<=0 / 展開ゼロ / child ゼロ のいずれかで、呼び出し側は
+    initial+player から phase1 fallback を生成する (従来 search() の fallback と同一)。
+    """
     parsed_player, raw_planets, raw_fleets, step = _parse_obs(obs)
     if player != parsed_player:
         player = parsed_player
@@ -279,9 +287,8 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
         step=step,
     )
 
-    fallback_moves = _actions_to_moves(tuple(_phase1_decisions(initial, player)))
     if time_budget_sec <= 0.0:
-        return fallback_moves
+        return player, initial, None
 
     started_at = time.perf_counter()
     expanded = _expand_turn(
@@ -292,7 +299,7 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
         time_budget_sec=time_budget_sec,
     )
     if expanded is None or not expanded:
-        return fallback_moves
+        return player, initial, None
 
     root = MCTSNode(state=initial)
     for child_state in expanded:
@@ -301,7 +308,7 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
         root.children.append(MCTSNode(state=child_after_turn, parent=root))
 
     if not root.children:
-        return fallback_moves
+        return player, initial, None
 
     # H016 step 6 / H017 (exp/060): NN value / policy head が有効なら leaf 評価 (value) /
     # root prior (policy) を NN に差し替える。ctx (comet/angular_velocity/overage) は
@@ -349,6 +356,15 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
         chosen.value_sum += value
         root.visits += 1
 
+    return player, initial, root
+
+
+def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[float]]:
+    """MCTS による 1 ターン分の moves。budget 内で root child を visit-count 選択。"""
+    player, initial, root = _search_root(obs, player, time_budget_sec)
+    if root is None:
+        return _actions_to_moves(tuple(_phase1_decisions(initial, player)))
+
     best = max(
         root.children,
         key=lambda c: (
@@ -357,6 +373,58 @@ def search(obs: Any, player: int, time_budget_sec: float = 0.8) -> list[list[flo
         ),
     )
     return _actions_to_moves(best.state.root_actions)
+
+
+def search_root_visit_policy(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[float]:
+    """AlphaZero policy target: MCTS root の visit 分布を policy index 規約に集約・正規化。
+
+    返り値は len POLICY_DIM (= MAX_PLANETS + 1) の確率分布 (行和 1):
+      i ∈ [0, MAX_PLANETS) = encoder の planet slot i (= ships 降順 sort の i 番目) を
+        launch 元とする child の visit 合計
+      i = MAX_PLANETS = no-op (launch なし child) の visit 合計
+    index 規約は `_assign_child_priors` (PUCT prior) と 1:1 = train_value.py の
+    `policy_target` 並びと一致 (train/serve skew 回避)。`export_value_data.py --policy`
+    が各 timestep の教師分布として記録する。
+
+    1 child が複数 planet から launch する compound action は visit を launch 元数で
+    均等配分する (`_assign_child_priors` の prob 平均と対称)。encoder 上位 MAX_PLANETS
+    から truncate された launch 元しか持たない child は no-op slot に寄せる。
+    探索不可 (展開ゼロ) や全 visit ゼロは no-op one-hot を返す。
+    """
+    from src.features.encoder import MAX_PLANETS
+
+    policy_dim = MAX_PLANETS + 1
+    noop_idx = MAX_PLANETS
+    target = [0.0] * policy_dim
+
+    player, initial, root = _search_root(obs, player, time_budget_sec)
+    if root is None or not root.children:
+        target[noop_idx] = 1.0
+        return target
+
+    # encoder と同一 sort (ships 降順, 上位 MAX_PLANETS) で planet.id -> slot を再構築
+    sorted_planets = sorted(initial.planets, key=lambda p: p.ships, reverse=True)[:MAX_PLANETS]
+    id_to_slot = {p.id: i for i, p in enumerate(sorted_planets)}
+
+    for child in root.children:
+        if child.visits <= 0:
+            continue
+        sources = [
+            a.source_id for a in child.state.root_actions if a.target_id is not None and a.ships > 0
+        ]
+        slots = [id_to_slot[s] for s in sources if s in id_to_slot]
+        if slots:
+            share = child.visits / len(slots)
+            for i in slots:
+                target[i] += share
+        else:
+            target[noop_idx] += child.visits
+
+    total = sum(target)
+    if total <= 0.0:
+        target[noop_idx] = 1.0
+        return target
+    return [t / total for t in target]
 
 
 def debug_root_priors(obs: Any, player: int, time_budget_sec: float = 0.3) -> list[float]:
