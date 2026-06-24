@@ -131,6 +131,58 @@ def _measure_latency(
     return out, elapsed_ms
 
 
+def _onnx_output_names(path: Path) -> list[str]:
+    """ONNX graph の出力名一覧を返す (dual-head=PolicyValueNet 検出用)。"""
+    import onnx
+
+    model = onnx.load(str(path), load_external_data=False)
+    return [o.name for o in model.graph.output]
+
+
+def _run_session(path: Path, feed: dict[str, np.ndarray], output_names: list[str]) -> list:
+    """CPUExecutionProvider で指定出力を 1 回推論する (latency 計測なし)。"""
+    import onnxruntime as ort
+
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = 1
+    sess = ort.InferenceSession(str(path), sess_options=so, providers=["CPUExecutionProvider"])
+    return sess.run(output_names, feed)
+
+
+def _verify_policy_survives(fp32_path: Path, int8_path: Path, feed: dict[str, np.ndarray]) -> dict:
+    """dual-head ONNX の policy_logits が int8 量子化後も健全か検証する。
+
+    MCTS PUCT prior は policy_logits を softmax して root child prior に配線するため、
+    int8 量子化で policy head が壊れる (NaN/Inf・masked padding の崩壊) と、value だけを
+    見る既存検証では検出できず stage3 が success を返し、supervisor の GPU run が壊れた
+    prior を serve してしまう。本検証は value 検証の盲点 (policy 出力) を埋める。
+
+    policy index 規約 (train_value.py / encoder と 1:1): slot [0:MAX_PLANETS) は planet
+    token に対応し planet_mask==0 (padding) は _MASK_NEG で softmax 後 ~0、slot MAX_PLANETS
+    は no-op (常時 valid)。
+    """
+    fp32_logits = np.asarray(_run_session(fp32_path, feed, ["policy_logits"])[0], dtype=np.float64)
+    int8_logits = np.asarray(_run_session(int8_path, feed, ["policy_logits"])[0], dtype=np.float64)
+
+    def _softmax(x: np.ndarray) -> np.ndarray:
+        z = x - x.max(axis=-1, keepdims=True)
+        e = np.exp(z)
+        return e / e.sum(axis=-1, keepdims=True)
+
+    int8_probs = _softmax(int8_logits)
+    planet_mask = np.asarray(feed["planet_mask"])  # (batch, MAX_PLANETS)
+    n_planet = planet_mask.shape[1]
+    pad = planet_mask == 0.0  # padding planet = policy slot で prob ~0 であるべき
+    padding_prob = (int8_probs[:, :n_planet] * pad).sum(axis=-1)
+    return {
+        "policy_dim": int(int8_logits.shape[-1]),
+        "policy_int8_finite": bool(np.isfinite(int8_logits).all()),
+        "policy_softmax_sum_dev": round(float(np.abs(int8_probs.sum(axis=-1) - 1.0).max()), 6),
+        "policy_padding_prob_max": round(float(padding_prob.max()) if pad.any() else 0.0, 6),
+        "policy_max_abs_diff": round(float(np.abs(int8_logits - fp32_logits).max()), 5),
+    }
+
+
 def evaluate(
     fp32_path: Path,
     int8_path: Path,
@@ -139,7 +191,11 @@ def evaluate(
     warmup: int,
     seed: int,
 ) -> dict:
-    """FP32 と int8 ONNX を同一 feed で比較し latency/size/精度を集計する。"""
+    """FP32 と int8 ONNX を同一 feed で比較し latency/size/精度を集計する。
+
+    dual-head ONNX (PolicyValueNet: value + policy_logits) を検出した場合は policy_logits
+    の int8 量子化生存も併せて検証する (`_verify_policy_survives`)。
+    """
     rng = np.random.default_rng(seed)
     feed = _make_feed(rng, batch)
 
@@ -158,7 +214,7 @@ def evaluate(
 
     fp32_kb = fp32_path.stat().st_size / 1024.0
     int8_kb = int8_path.stat().st_size / 1024.0
-    return {
+    result = {
         "batch": batch,
         "iters": iters,
         "fp32_latency_ms": round(fp32_ms, 4),
@@ -173,6 +229,11 @@ def evaluate(
         # 1秒/turn 予算で評価可能な state 数 (FP32 単 query 基準の目安)
         "fp32_evals_per_turn": int(TURN_BUDGET_MS / fp32_ms) if fp32_ms > 0 else None,
     }
+
+    # dual-head ONNX (PolicyValueNet) なら policy_logits の量子化生存も検証する
+    if "policy_logits" in _onnx_output_names(int8_path):
+        result.update(_verify_policy_survives(fp32_path, int8_path, feed))
+    return result
 
 
 def _export_fp32_synthetic(out_path: Path, seed: int) -> None:
@@ -194,6 +255,31 @@ def _export_fp32_synthetic(out_path: Path, seed: int) -> None:
         input_names=INPUT_NAMES,
         output_names=["value"],
         dynamic_axes={name: {0: "batch"} for name in INPUT_NAMES} | {"value": {0: "batch"}},
+        opset_version=17,
+    )
+
+
+def _export_dualhead_synthetic(out_path: Path, seed: int) -> None:
+    """smoke 用: PolicyValueNet を初期化し dual-head (value + policy_logits) FP32 ONNX を
+    export (H017。notebook stage3 が POLICY=1 で量子化する model と同署名)。"""
+    import torch
+
+    from src.nn.model import PolicyValueNet
+
+    torch.manual_seed(seed)
+    model = PolicyValueNet().eval()
+    rng = np.random.default_rng(seed)
+    feed = _make_feed(rng, batch=2)
+    args = tuple(torch.from_numpy(feed[name]) for name in INPUT_NAMES)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.onnx.export(
+        model,
+        args,
+        str(out_path),
+        input_names=INPUT_NAMES,
+        output_names=["value", "policy_logits"],
+        dynamic_axes={name: {0: "batch"} for name in INPUT_NAMES}
+        | {"value": {0: "batch"}, "policy_logits": {0: "batch"}},
         opset_version=17,
     )
 
@@ -230,7 +316,28 @@ def _smoke() -> int:
         # 逆効果 (size ratio ~1.23 / speedup ~0.92)。量子化が必ず効くという偽の期待を
         # smoke に焼き込まないため、これらは情報出力に留める (docstring「実測の結論」)。
 
+        # (4) dual-head (H017 PolicyValueNet): policy_logits が int8 量子化後も生存するか
+        #     検証する (PUCT prior の serve 健全性。value だけ見る上記検証の盲点を埋める)。
+        dh_fp32 = Path(tmp) / "pv_net.onnx"
+        dh_int8 = Path(tmp) / "pv_net.int8.onnx"
+        _export_dualhead_synthetic(dh_fp32, seed=0)
+        quantize_int8(dh_fp32, dh_int8)
+        assert "policy_logits" in _onnx_output_names(dh_int8), "dual-head 出力が int8 で消失"
+        # padding slot を確実に作るため planet 3 件のみ active な feed で検証
+        dh_feed = _make_feed(np.random.default_rng(2), batch=1)
+        dh_feed["planet_mask"] = np.zeros_like(dh_feed["planet_mask"])
+        dh_feed["planet_mask"][:, :3] = 1.0
+        pol = _verify_policy_survives(dh_fp32, dh_int8, dh_feed)
+        assert pol["policy_int8_finite"], "int8 policy_logits が非有限"
+        assert (
+            pol["policy_softmax_sum_dev"] < 1e-4
+        ), f"int8 policy softmax 総和が 1 でない: {pol['policy_softmax_sum_dev']}"
+        assert (
+            pol["policy_padding_prob_max"] < 1e-3
+        ), f"int8 padding slot prob が ~0 でない (masked planet 漏れ): {pol['policy_padding_prob_max']}"
+
     print(f"  quantize OK: {json.dumps(stats)}")
+    print(f"  dual-head policy survives int8: {json.dumps(pol)}")
     print("quantize_onnx smoke OK")
     return 0
 
