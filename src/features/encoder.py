@@ -114,15 +114,50 @@ def _global_features(o: Observation) -> list[float]:
     ]
 
 
+def select_planet_tokens(planets: list, player: int) -> list:
+    """token に残す planet を選び、全体 ships 降順の順序で返す (<= MAX_PLANETS)。
+
+    H017 (exp/062): policy head は per-token logit (= encoder token 位置 1:1) で、
+    launch 元は必ず自軍 planet。素朴な「全 planet ships 降順 top-MAX_PLANETS」では
+    自軍 planet が敵/中立の大艦隊に押し出され mid/late game で頻繁に truncate され、
+    その launch が policy index に乗らず no-op に collapse する欠陥があった
+    (learned_rules `policy_index_truncates_own_planets`、e2e policy_noop_frac=0.67)。
+
+    対策: 切り詰めが起きる (planet 数 > MAX_PLANETS) 場合のみ **自軍 planet を優先保持**
+    し、残り slot を ships 降順の非自軍で充填する。**token の順序自体は全体 ships 降順を
+    維持** (membership のみ変更) するため、value head (順序非依存の permutation-invariant
+    pooling) は planet 数 <= MAX_PLANETS の局面で完全不変。
+
+    encoder と MCTS serve (`_assign_child_priors` / `search_root_visit_policy`) が
+    **本 helper を共有**することで policy index の train/serve skew を構造的にゼロにする。
+    planet は `.id` / `.ships` / `.owner` を持てばよい (Planet / ProjectedPlanet 共通)。
+    """
+    by_ships = sorted(planets, key=lambda p: p.ships, reverse=True)
+    if len(by_ships) <= MAX_PLANETS:
+        return by_ships
+    # 自軍を ships 降順で先に確保 (by_ships は既に ships 降順)。自軍数が MAX_PLANETS 超の
+    # 極稀ケースは ships 上位 MAX_PLANETS のみ残す。
+    own_ids = [p.id for p in by_ships if p.owner == player]
+    kept_ids = set(own_ids[:MAX_PLANETS])
+    # 残り slot を ships 降順 (自軍含む既存はそのまま) で充填
+    for p in by_ships:
+        if len(kept_ids) >= MAX_PLANETS:
+            break
+        kept_ids.add(p.id)
+    return [p for p in by_ships if p.id in kept_ids]
+
+
 def encode_observation(o: Observation) -> EncodedState:
     """Observation を固定サイズ tensor bundle に変換する。
 
     MAX_PLANETS / MAX_FLEETS を超える要素は ships 降順で上位を残し切り詰める
-    (盤面支配に効く大艦隊を優先保持)。padding は 0 埋め + mask=0。
+    (盤面支配に効く大艦隊を優先保持)。ただし planet は `select_planet_tokens` で
+    自軍 launch 元を優先保持する (policy index truncation 回避、H017 exp/062)。
+    padding は 0 埋め + mask=0。
     """
     comet_ids = set(o.comet_planet_ids)
 
-    planets = sorted(o.planets, key=lambda p: p.ships, reverse=True)[:MAX_PLANETS]
+    planets = select_planet_tokens(o.planets, o.player)
     planet_tokens = np.zeros((MAX_PLANETS, PLANET_FEATURES), dtype=np.float32)
     planet_mask = np.zeros((MAX_PLANETS,), dtype=np.float32)
     for i, planet in enumerate(planets):
@@ -179,3 +214,36 @@ if __name__ == "__main__":  # CPU smoke (tiny sample で end-to-end 検証)
     print("  planet_tokens", enc.planet_tokens.shape, "mask sum", enc.planet_mask.sum())
     print("  fleet_tokens", enc.fleet_tokens.shape, "mask sum", enc.fleet_mask.sum())
     print("  global", enc.global_features)
+
+    # --- H017 (exp/062): >MAX_PLANETS 局面で自軍 launch 元が truncate されない検証 ---
+    # 低 ships の自軍 3 個 + 高 ships の敵/中立を多数並べ、素朴な top-MAX_PLANETS では
+    # 自軍が押し出される状況を作る (policy_index_truncates_own_planets の再現条件)。
+    many = [
+        Planet(id=900 + k, owner=1, x=5.0, y=5.0, radius=2.0, ships=2, production=1)
+        for k in range(3)
+    ]
+    many += [
+        Planet(id=k, owner=0, x=50.0, y=50.0, radius=3.0, ships=100 + k, production=3)
+        for k in range(MAX_PLANETS + 5)
+    ]
+    own_ids = {p.id for p in many if p.owner == 1}
+    naive = {p.id for p in sorted(many, key=lambda p: p.ships, reverse=True)[:MAX_PLANETS]}
+    assert not (own_ids & naive), "テスト前提崩れ: 素朴 top-N で自軍が既に残ってしまう"
+    retained = {p.id for p in select_planet_tokens(many, player=1)}
+    assert (
+        own_ids <= retained
+    ), f"自軍 launch 元が truncate された: own={own_ids} retained={retained}"
+    assert len(retained) == MAX_PLANETS, f"retained 数不正: {len(retained)}"
+    # 順序は全体 ships 降順を維持 (retained 内)
+    ordered = select_planet_tokens(many, player=1)
+    assert [p.ships for p in ordered] == sorted(
+        (p.ships for p in ordered), reverse=True
+    ), "token 順序が ships 降順でない"
+    # planet 数 <= MAX_PLANETS では従来挙動と完全一致 (value path 不変保証)
+    few = many[:3] + many[3:6]
+    assert select_planet_tokens(few, player=1) == sorted(
+        few, key=lambda p: p.ships, reverse=True
+    ), "<= MAX_PLANETS で従来 (素朴 ships 降順) と不一致"
+    print(
+        f"  own-retention OK: 自軍 {own_ids} が >MAX_PLANETS 局面でも全保持 (retained {len(retained)})"
+    )
