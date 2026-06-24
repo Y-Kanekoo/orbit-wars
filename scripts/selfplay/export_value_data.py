@@ -53,7 +53,7 @@ _CRASH_MAX_STEPS = 50
 
 
 class Sample(NamedTuple):
-    """1 timestep の学習サンプル (encode 済 tensor + value target + meta)。"""
+    """1 timestep の学習サンプル (encode 済 tensor + value/policy target + meta)。"""
 
     planet_tokens: np.ndarray
     planet_mask: np.ndarray
@@ -64,6 +64,9 @@ class Sample(NamedTuple):
     player: int
     step: int
     game_id: int
+    # H017 (exp/061) policy target = MCTS root visit 分布 (len POLICY_DIM, 行和 1)。
+    # policy_budget=0.0 (既定) では空配列 = value-only データ (従来 npz 互換)。
+    policy_target: np.ndarray
 
 
 def _resolve_agent(name: str) -> str:
@@ -76,7 +79,12 @@ def _resolve_agent(name: str) -> str:
 
 
 def collect_game(
-    agent1: str, agent2: str, seed: int, stride: int = 1, game_id: int = 0
+    agent1: str,
+    agent2: str,
+    seed: int,
+    stride: int = 1,
+    game_id: int = 0,
+    policy_budget: float = 0.0,
 ) -> tuple[list[Sample], list[float]]:
     """1 試合を実行し、各 player・各 timestep のサンプル列と最終 rewards を返す。
 
@@ -85,6 +93,13 @@ def collect_game(
     game_id は train/val を **game 単位で grouped split** するための識別子
     (MC-outcome は同一 game の全 timestep が同一 value target のため、timestep
     random split は val loss を leakage で楽観化させる → 学習側で game_id 分割が必須)。
+
+    policy_budget>0.0 (H017 exp/061) のとき、各 timestep で MCTS を `policy_budget`
+    秒走らせ root visit 分布 (AlphaZero policy target) を `policy_target` に記録する
+    (mcts.search_root_visit_policy = `_assign_child_priors` と 1:1 の index 規約)。
+    各 obs ごとに探索を回すため重い (state 数 × policy_budget 秒)、scale 生成は
+    Kaggle GPU escalate 領分 (learned_rules local_cpu_selfplay_export_infeasible_at_scale)。
+    policy_budget=0.0 では空配列を入れ value-only データ (従来 npz 互換) のまま。
     """
     from kaggle_environments import make
 
@@ -97,6 +112,10 @@ def collect_game(
     if n_steps < _CRASH_MAX_STEPS and all(r == 0.0 for r in rewards):
         return [], rewards  # crash suspect: agent が呼ばれず信号なし
 
+    if policy_budget > 0.0:
+        from src.search.mcts import search_root_visit_policy
+
+    empty_policy = np.zeros(0, dtype=np.float32)
     samples: list[Sample] = []
     for t in range(0, n_steps, stride):
         step = env.steps[t]
@@ -109,6 +128,11 @@ def collect_game(
             # 同一 index p で引くため符号は自動整合 (player-relative encoder と一致)。
             value = rewards[p] if p < len(rewards) else 0.0
             enc = encode_observation(o)
+            if policy_budget > 0.0:
+                # 推論時と同じ raw obs / player で MCTS を回し visit 分布を教師化
+                pol = np.asarray(search_root_visit_policy(obs, p, policy_budget), dtype=np.float32)
+            else:
+                pol = empty_policy
             samples.append(
                 Sample(
                     planet_tokens=enc.planet_tokens,
@@ -120,6 +144,7 @@ def collect_game(
                     player=o.player,
                     step=t,
                     game_id=game_id,
+                    policy_target=pol,
                 )
             )
     return samples, rewards
@@ -133,6 +158,7 @@ class _Task(NamedTuple):
     seed: int
     stride: int
     task_idx: int  # 投入順の安定 id (crash 除外後に game_id へ dense 再採番)
+    policy_budget: float  # >0 で各 timestep の MCTS visit policy target を記録 (H017)
 
 
 def _run_task(task: _Task) -> tuple[int, list[Sample], list[float]]:
@@ -141,7 +167,14 @@ def _run_task(task: _Task) -> tuple[int, list[Sample], list[float]]:
     game_id は collect_game に task_idx を渡しておき、呼び出し側で crash 除外後に
     dense 再採番する (並列実行で投入順と完了順がズレるため task_idx で安定整列)。
     """
-    samples, rewards = collect_game(task.a1, task.a2, task.seed, task.stride, game_id=task.task_idx)
+    samples, rewards = collect_game(
+        task.a1,
+        task.a2,
+        task.seed,
+        task.stride,
+        game_id=task.task_idx,
+        policy_budget=task.policy_budget,
+    )
     return task.task_idx, samples, rewards
 
 
@@ -153,14 +186,18 @@ def export(
     seed_base: int,
     out_path: Path,
     workers: int = 1,
+    policy_budget: float = 0.0,
 ) -> dict:
-    """opponents mix で self-play し、value dataset を npz に書き出す。
+    """opponents mix で self-play し、value (+ optional policy) dataset を npz に書き出す。
 
     seat split: 偶数 game は agent=p1、奇数 game は agent=p2 で seat bias を平準化。
     workers>1 で game 単位に multiprocess 並列化する (各 game は独立に env を make する
     self-contained 処理のため fan-out 可能、Kaggle の複数 CPU core を活用)。結果は
     task_idx で投入順に整列し、crash 除外後に game_id を dense 再採番するため
     workers 値に依存せず決定的 (workers=1 は従来逐次挙動と同一)。
+
+    policy_budget>0.0 (H017 exp/061) で npz に `policy_target` (N, POLICY_DIM) を追加し
+    dual-head 学習 (train_value.py --policy) のデータにする。0.0 では value-only npz。
     """
     a_agent = _resolve_agent(agent)
 
@@ -175,7 +212,16 @@ def export(
                 a1, a2 = a_agent, a_opp
             else:
                 a1, a2 = a_opp, a_agent  # seat swap
-            tasks.append(_Task(a1=a1, a2=a2, seed=seed, stride=stride, task_idx=task_idx))
+            tasks.append(
+                _Task(
+                    a1=a1,
+                    a2=a2,
+                    seed=seed,
+                    stride=stride,
+                    task_idx=task_idx,
+                    policy_budget=policy_budget,
+                )
+            )
             task_idx += 1
 
     # task_idx -> (samples, rewards) を収集 (workers>1 は ProcessPool で fan-out)
@@ -219,20 +265,18 @@ def export(
     step = np.asarray([s.step for s in all_samples], dtype=np.int32)
     game_id = np.asarray([s.game_id for s in all_samples], dtype=np.int32)
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        out_path,
-        planet_tokens=planet_tokens,
-        planet_mask=planet_mask,
-        fleet_tokens=fleet_tokens,
-        fleet_mask=fleet_mask,
-        global_features=global_features,
-        value=value,
-        player=player,
-        step=step,
-        game_id=game_id,
-    )
-    return {
+    arrays = {
+        "planet_tokens": planet_tokens,
+        "planet_mask": planet_mask,
+        "fleet_tokens": fleet_tokens,
+        "fleet_mask": fleet_mask,
+        "global_features": global_features,
+        "value": value,
+        "player": player,
+        "step": step,
+        "game_id": game_id,
+    }
+    stats = {
         "n_samples": len(all_samples),
         "games_used": games_used,
         "games_skipped": games_skipped,
@@ -245,9 +289,30 @@ def export(
         "out": str(out_path),
     }
 
+    # H017 (exp/061): policy_target (MCTS visit 分布) を生成した場合のみ npz に追加。
+    # policy_noop_frac = no-op slot (= MAX_PLANETS) に乗った確率質量の平均。高いほど
+    # launch がない or launch 元が encoder 上位 MAX_PLANETS から truncate されている
+    # ことを示す (learned_rules policy_index_truncates_own_planets のデータ品質 signal)。
+    if policy_budget > 0.0:
+        from src.features.encoder import MAX_PLANETS
 
-def _smoke() -> int:
-    """符号正当性 + shape を assert する CPU smoke (tests/ 改変禁止のため __main__ 内)。"""
+        policy_target = np.stack([s.policy_target for s in all_samples]).astype(np.float32)
+        arrays["policy_target"] = policy_target
+        stats["policy_dim"] = int(policy_target.shape[1])
+        stats["policy_noop_frac"] = float(policy_target[:, MAX_PLANETS].mean())
+        stats["policy_row_sum_min"] = float(policy_target.sum(axis=1).min())
+        stats["policy_row_sum_max"] = float(policy_target.sum(axis=1).max())
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out_path, **arrays)
+    return stats
+
+
+def _smoke(policy_budget: float = 0.0) -> int:
+    """符号正当性 + shape を assert する CPU smoke (tests/ 改変禁止のため __main__ 内)。
+
+    policy_budget>0 で policy_target (MCTS visit 分布) の shape/正規化も検証する。
+    """
     from src.features.encoder import (
         FLEET_FEATURES,
         GLOBAL_FEATURES,
@@ -256,7 +321,9 @@ def _smoke() -> int:
         PLANET_FEATURES,
     )
 
-    samples, rewards = collect_game("random", "random", seed=1, stride=20)
+    samples, rewards = collect_game(
+        "random", "random", seed=1, stride=20, policy_budget=policy_budget
+    )
     assert samples, "smoke: サンプルが空 (env 異常)"
     # 符号正当性 (advisor 点1): 各サンプルの value は **その player 視点** の最終勝敗。
     for s in samples:
@@ -267,6 +334,11 @@ def _smoke() -> int:
         assert s.planet_tokens.shape == (MAX_PLANETS, PLANET_FEATURES)
         assert s.fleet_tokens.shape == (MAX_FLEETS, FLEET_FEATURES)
         assert s.global_features.shape == (GLOBAL_FEATURES,)
+        if policy_budget > 0.0:
+            pol = s.policy_target
+            assert pol.shape == (MAX_PLANETS + 1,), f"policy_target shape 不正: {pol.shape}"
+            assert (pol >= 0).all(), "policy_target に負値"
+            assert abs(float(pol.sum()) - 1.0) < 1e-5, f"policy_target 行和 != 1: {pol.sum()}"
     # 両 player のサンプルが存在し、勝者/敗者で value 符号が反転していること
     players_seen = {s.player for s in samples}
     if rewards[0] != rewards[1]:
@@ -297,14 +369,22 @@ def main() -> int:
     )
     ap.add_argument("--out", default="data/value_dataset.npz")
     ap.add_argument(
+        "--policy-budget",
+        type=float,
+        default=0.0,
+        help="H017: >0 で各 timestep の MCTS visit policy target を秒数 budget で記録 "
+        "(dual-head 学習用、重いので scale 生成は Kaggle escalate)",
+    )
+    ap.add_argument(
         "--smoke",
         action="store_true",
-        help="1 game vs random を収集し符号正当性・shape を assert (書き出しなし)",
+        help="1 game vs random を収集し符号正当性・shape を assert (書き出しなし)。"
+        "--policy-budget 併用で policy_target も検証",
     )
     args = ap.parse_args()
 
     if args.smoke:
-        return _smoke()
+        return _smoke(policy_budget=args.policy_budget)
 
     opponents = [o.strip() for o in args.opponents.split(",") if o.strip()]
     stats = export(
@@ -315,6 +395,7 @@ def main() -> int:
         seed_base=args.seed_base,
         out_path=_ROOT / args.out if not Path(args.out).is_absolute() else Path(args.out),
         workers=args.workers,
+        policy_budget=args.policy_budget,
     )
     import json
 
