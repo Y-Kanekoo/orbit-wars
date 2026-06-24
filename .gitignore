@@ -66,3 +66,7 @@ logs/
 reports/
 *.daily.md
 data/*.npz
+
+# NN-in-MCTS resumable runner の accumulate 用 runtime artifact (winrate_runner.py)
+state/nn_mcts_games.jsonl
+state/nn_mcts_winrate.json
