@@ -186,15 +186,17 @@ def _assign_child_priors(
     """root state の NN policy で各 child に prior を割当てる (総和 1 に正規化)。
 
     policy index 規約 (train/serve skew 回避、train_value.py と 1:1):
-      i ∈ [0, MAX_PLANETS) = encoder の planet slot i (= ships 降順 sort の i 番目)
+      i ∈ [0, MAX_PLANETS) = encoder の planet token slot i (= `select_planet_tokens`
+        の i 番目 = 自軍優先保持後の全体 ships 降順)
       i = MAX_PLANETS = no-op (launch しない)
     各 child の prior は、その root_actions の launch 元 planet の policy prob を平均
-    (launch 無し child は no-op prob)。launch 元が encoder の上位 MAX_PLANETS から
-    truncate された稀ケースは no-op prob で代替する。
+    (launch 無し child は no-op prob)。H017 exp/062 で encoder が自軍を優先保持する
+    ため launch 元の truncate は (自軍 > MAX_PLANETS の極稀ケースを除き) 起きないが、
+    万一 truncate された場合は安全に no-op prob で代替する。
     """
     import numpy as np
 
-    from src.features.encoder import MAX_PLANETS
+    from src.features.encoder import MAX_PLANETS, select_planet_tokens
     from src.nn.value_infer import encode_search_state
 
     enc = encode_search_state(initial.planets, initial.fleets, player, nn_ctx)
@@ -203,9 +205,9 @@ def _assign_child_priors(
     probs = [float(p) for p in (exp / exp.sum())]
     noop_idx = MAX_PLANETS
 
-    # encoder と同一 sort (ships 降順, 上位 MAX_PLANETS) で planet.id -> slot を再構築
-    sorted_planets = sorted(initial.planets, key=lambda p: p.ships, reverse=True)[:MAX_PLANETS]
-    id_to_slot = {p.id: i for i, p in enumerate(sorted_planets)}
+    # encoder (`select_planet_tokens`) と **同一 helper** で planet.id -> token slot を
+    # 再構築 (train/serve skew をゼロ化、自軍優先保持を共有)
+    id_to_slot = {p.id: i for i, p in enumerate(select_planet_tokens(initial.planets, player))}
 
     raw: list[float] = []
     for child in root.children:
@@ -379,19 +381,19 @@ def search_root_visit_policy(obs: Any, player: int, time_budget_sec: float = 0.3
     """AlphaZero policy target: MCTS root の visit 分布を policy index 規約に集約・正規化。
 
     返り値は len POLICY_DIM (= MAX_PLANETS + 1) の確率分布 (行和 1):
-      i ∈ [0, MAX_PLANETS) = encoder の planet slot i (= ships 降順 sort の i 番目) を
-        launch 元とする child の visit 合計
+      i ∈ [0, MAX_PLANETS) = encoder の planet token slot i (= `select_planet_tokens`
+        の i 番目 = 自軍優先保持後の全体 ships 降順) を launch 元とする child の visit 合計
       i = MAX_PLANETS = no-op (launch なし child) の visit 合計
     index 規約は `_assign_child_priors` (PUCT prior) と 1:1 = train_value.py の
     `policy_target` 並びと一致 (train/serve skew 回避)。`export_value_data.py --policy`
     が各 timestep の教師分布として記録する。
 
     1 child が複数 planet から launch する compound action は visit を launch 元数で
-    均等配分する (`_assign_child_priors` の prob 平均と対称)。encoder 上位 MAX_PLANETS
-    から truncate された launch 元しか持たない child は no-op slot に寄せる。
-    探索不可 (展開ゼロ) や全 visit ゼロは no-op one-hot を返す。
+    均等配分する (`_assign_child_priors` の prob 平均と対称)。H017 exp/062 で encoder が
+    自軍を優先保持するため launch 元の truncate は極稀だが、万一残った場合は no-op slot に
+    寄せる。探索不可 (展開ゼロ) や全 visit ゼロは no-op one-hot を返す。
     """
-    from src.features.encoder import MAX_PLANETS
+    from src.features.encoder import MAX_PLANETS, select_planet_tokens
 
     policy_dim = MAX_PLANETS + 1
     noop_idx = MAX_PLANETS
@@ -402,9 +404,8 @@ def search_root_visit_policy(obs: Any, player: int, time_budget_sec: float = 0.3
         target[noop_idx] = 1.0
         return target
 
-    # encoder と同一 sort (ships 降順, 上位 MAX_PLANETS) で planet.id -> slot を再構築
-    sorted_planets = sorted(initial.planets, key=lambda p: p.ships, reverse=True)[:MAX_PLANETS]
-    id_to_slot = {p.id: i for i, p in enumerate(sorted_planets)}
+    # encoder (`select_planet_tokens`) と **同一 helper** で planet.id -> token slot を再構築
+    id_to_slot = {p.id: i for i, p in enumerate(select_planet_tokens(initial.planets, player))}
 
     for child in root.children:
         if child.visits <= 0:
