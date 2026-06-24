@@ -11,6 +11,10 @@
 #   1. scripts/selfplay/export_value_data.py --workers=<cpu>  (並列 self-play → npz)
 #   2. scripts/nn/train_value.py                              (ValueNet 学習 → .pt + .onnx)
 #   3. scripts/nn/quantize_onnx.py                            (int8 量子化 + CPU latency)
+#   4. scripts/selfplay/tournament.py (EVAL_RUN=1, H033/exp068)  NN-in-MCTS winrate
+#      (trained int8 を MCTS leaf value (+POLICY 時 PUCT prior) に wire し strong-opponent
+#       winrate を測定 = H016/H017 の go/no-go signal。`nn_in_mcts_leaf_local_eval_infeasible_in_harness`
+#       で local 不能ゆえ Kaggle 側で取得。既定 OFF = 従来 train→quantize で完全不変)
 #
 # === H017 dual-head mode (POLICY=1, exp/065) ===============================
 # 環境変数 POLICY=1 で PolicyValueNet (value + policy prior) の dual-head 学習に
@@ -67,11 +71,22 @@ POLICY = os.environ.get("POLICY", "0") == "1"
 # policy_target は各 timestep で MCTS visit 探索を回すため value-only より重い
 # (per-timestep ~POLICY_BUDGET 秒の追加 search)。first-signal は小 budget で十分。
 POLICY_BUDGET = float(os.environ.get("POLICY_BUDGET", "0.1"))
+# H033 (exp/068): trained model の go/no-go signal = NN-in-MCTS の strong-opponent
+# winrate。`nn_in_mcts_leaf_local_eval_infeasible_in_harness` (local harness が
+# 8-worker 並列下で OOM/reap、~466s で親死亡) ゆえ Kaggle 側で測定する。
+# EVAL_RUN=1 opt-in (既定 OFF = 従来 train→quantize で完全不変)。
+EVAL_RUN = os.environ.get("EVAL_RUN", "0") == "1"
+EVAL_N = int(os.environ.get("EVAL_N", "30"))  # 相手あたり試合数
+# local OOM の正体は高 worker 並列下の onnxruntime/torch メモリ圧 → 既定で低 worker。
+EVAL_WORKERS = int(os.environ.get("EVAL_WORKERS", "2"))
+# 既定は本 run が生成した int8 を測定。dataset mount 済の既存 model を指す場合に上書き可。
+EVAL_MODEL = os.environ.get("EVAL_MODEL", "")
 
 WORK = Path("/kaggle/working")
 DATA_NPZ = WORK / "value_dataset.npz"
 CKPT = WORK / "value_net"  # train が .pt / .onnx を生成
 INT8 = WORK / "value_net.int8.onnx"
+EVAL_JSON = WORK / "nn_mcts_winrate.json"
 
 
 def run(cmd: list[str], cwd: Path) -> None:
@@ -203,6 +218,46 @@ def main() -> int:
     )
     timings["quantize_s"] = round(time.time() - t, 1)
 
+    # --- stage 4 (H033, EVAL_RUN=1): NN-in-MCTS winrate (Kaggle 側 go/no-go) ---
+    # trained int8 model を MCTS leaf value (+ POLICY 時 PUCT prior) に wire し、
+    # tournament.py で random/nearest_sniper/prev_best vs NN-in-MCTS の winrate を測定。
+    # これが H016/H017 全体の go/no-go signal (`nn_in_mcts_leaf_local_eval_infeasible_in_harness`
+    # で local 不能、ここで取得する)。
+    if EVAL_RUN:
+        t = time.time()
+        model_path = EVAL_MODEL or str(INT8)
+        # 親 env を継承し NN-in-MCTS path を有効化 (main.py は ORBIT_WARS_MCTS=1 を honor)。
+        eval_env = dict(os.environ)
+        eval_env["ORBIT_WARS_MCTS"] = "1"
+        eval_env["ORBIT_WARS_NN_VALUE"] = "1"
+        eval_env["ORBIT_WARS_NN_VALUE_MODEL"] = model_path
+        if POLICY:
+            # dual-head int8 は policy_logits も持つ → PUCT prior を有効化
+            eval_env["ORBIT_WARS_NN_POLICY"] = "1"
+            eval_env["ORBIT_WARS_NN_POLICY_MODEL"] = model_path
+        eval_cmd = [
+            sys.executable,
+            "scripts/selfplay/tournament.py",
+            "--agent",
+            "main.py",
+            "--opponents",
+            OPPONENTS,
+            "--n-per-opponent",
+            str(EVAL_N),
+            "--max-workers",
+            str(EVAL_WORKERS),
+            "--out",
+            str(EVAL_JSON),
+        ]
+        mode = "PUCT-prior+value-leaf" if POLICY else "value-leaf"
+        print(
+            f"\n$ [ORBIT_WARS_MCTS=1 NN-in-MCTS({mode}) model={model_path}] "
+            f"{' '.join(eval_cmd)}",
+            flush=True,
+        )
+        subprocess.run(eval_cmd, cwd=str(repo), check=True, env=eval_env)
+        timings["winrate_eval_s"] = round(time.time() - t, 1)
+
     n_games = GAMES_PER_OPPONENT * len(OPPONENTS.split(","))
     print(
         f"\n[DONE] mode={'dual-head(H017)' if POLICY else 'value-only(H016)'} "
@@ -210,18 +265,23 @@ def main() -> int:
         f"per_game≈{round(timings['export_s']/max(n_games,1),1)}s "
         f"outputs={sorted(p.name for p in WORK.glob('value_net*'))}"
     )
-    if POLICY:
+    if EVAL_RUN:
         print(
-            "次 iter (H017): value_net.int8.onnx を dataset 化 → ORBIT_WARS_MCTS=1 + "
-            "ORBIT_WARS_NN_POLICY=1 ORBIT_WARS_NN_POLICY_MODEL=<path> (+ NN value leaf) で "
-            "NN-in-MCTS の PUCT prior を有効化し strong-opponent winrate eval "
-            "(`nn_in_mcts_leaf_local_eval_infeasible_in_harness` ゆえ Kaggle 側 self-play eval)。"
+            f"[H033] NN-in-MCTS winrate → {EVAL_JSON.name} (per-opponent N={EVAL_N}, "
+            f"workers={EVAL_WORKERS})。go/no-go: strong opponent (nearest_sniper/prev_best) が "
+            "baseline (0.6 / 0.51) 付近に戻るか。winner=baseline (sniper 0.20/prev 0.17) からの回復が H016/H017 のコア signal。"
+        )
+    elif POLICY:
+        print(
+            "次 step (H017 go/no-go): EVAL_RUN=1 で本 notebook stage 4 を有効化 → trained "
+            "dual-head int8 を NN-in-MCTS (PUCT prior + value leaf) に wire し strong-opponent "
+            "winrate を Kaggle 側で測定 (`nn_in_mcts_leaf_local_eval_infeasible_in_harness`)。"
         )
     else:
         print(
-            "次 iter: value_net.int8.onnx を dataset 化 → ORBIT_WARS_NN_VALUE=1 + "
-            "ORBIT_WARS_NN_VALUE_MODEL=<path> で mix-eval し strong-opponent regression が "
-            "baseline 付近に戻るか測定 (H016 コア signal)。"
+            "次 step (H016 go/no-go): EVAL_RUN=1 で本 notebook stage 4 を有効化 → trained int8 を "
+            "NN-in-MCTS (value leaf) に wire し strong-opponent regression が baseline 付近に戻るか"
+            "Kaggle 側で測定 (H016 コア signal)。"
         )
     return 0
 
