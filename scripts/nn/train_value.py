@@ -37,6 +37,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from src.features.symmetry import augment_4fold  # noqa: E402
 from src.nn.model import ValueNet, count_params  # noqa: E402
 
 # ValueNet.forward の引数順と一致させること (ONNX serve skew 回避の要)。
@@ -68,11 +69,24 @@ def _grouped_split(
     return train_idx, val_idx
 
 
+def _slice_numpy(data: dict, idx: np.ndarray) -> dict[str, np.ndarray]:
+    """npz の指定 index 群を augment/tensor 化前の numpy 部分集合 dict に切り出す。"""
+    keys = (*INPUT_NAMES, "value", "game_id")
+    return {name: np.asarray(data[name])[idx] for name in keys}
+
+
+def _tensors_from_numpy(sub: dict[str, np.ndarray], device: torch.device) -> dict[str, Tensor]:
+    """numpy 部分集合を ValueNet forward 用 tensor dict + target に束ねる。"""
+    out = {
+        name: torch.from_numpy(np.ascontiguousarray(sub[name])).to(device) for name in INPUT_NAMES
+    }
+    out["value"] = torch.from_numpy(np.asarray(sub["value"]).astype(np.float32)).to(device)
+    return out
+
+
 def _load_tensors(data: dict, idx: np.ndarray, device: torch.device) -> dict[str, Tensor]:
     """npz の指定 index 群を ValueNet forward 用 tensor dict + target に束ねる。"""
-    out = {name: torch.from_numpy(np.asarray(data[name])[idx]).to(device) for name in INPUT_NAMES}
-    out["value"] = torch.from_numpy(np.asarray(data["value"])[idx].astype(np.float32)).to(device)
-    return out
+    return _tensors_from_numpy(_slice_numpy(data, idx), device)
 
 
 def _epoch(
@@ -148,14 +162,25 @@ def train(
     val_frac: float,
     seed: int,
     out_prefix: Path,
+    augment: bool = False,
 ) -> dict:
-    """value dataset から ValueNet を学習し checkpoint + ONNX を書き出す。"""
+    """value dataset から ValueNet を学習し checkpoint + ONNX を書き出す。
+
+    augment=True で train サブセットのみ 90/180/270° 回転で 4 倍に拡張する (H018)。
+    val は honest な汎化測定のため**拡張しない** (回転コピーは新情報を持たず val loss を
+    水増しするだけ)。回転は grouped split **後** の train_idx にのみ適用するため、同一
+    game の全回転は同じ side に留まり train/val leakage は起きない。
+    """
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     game_id = np.asarray(data["game_id"])
     train_idx, val_idx = _grouped_split(game_id, val_frac, seed)
-    train_t = _load_tensors(data, train_idx, device)
+    train_np = _slice_numpy(data, train_idx)
+    n_train_raw = int(len(train_idx))
+    if augment:
+        train_np = augment_4fold(train_np)
+    train_t = _tensors_from_numpy(train_np, device)
     val_t = _load_tensors(data, val_idx, device) if len(val_idx) else None
 
     model = ValueNet().to(device)
@@ -196,7 +221,9 @@ def train(
 
     first_tr, last_tr = history[0][0], history[-1][0]
     return {
-        "n_train": int(len(train_idx)),
+        "n_train_raw": n_train_raw,
+        "n_train": int(train_t["value"].shape[0]),
+        "augment": bool(augment),
         "n_val": int(len(val_idx)),
         "n_games": int(np.unique(game_id).size),
         "params": count_params(model),
@@ -294,6 +321,30 @@ def _smoke() -> int:
         assert (
             stats["onnx_round_trip_max_diff"] < 1e-4
         ), f"ONNX round-trip 不一致: {stats['onnx_round_trip_max_diff']}"
+
+        # --augment 検証 (H018): train が 4 倍・収束する・val game は非拡張のまま
+        aug = train(
+            data,
+            epochs=40,
+            batch_size=32,
+            lr=1e-3,
+            val_frac=0.25,
+            seed=0,
+            out_prefix=Path(tmp) / "value_net_aug",
+            augment=True,
+        )
+        assert (
+            aug["n_train"] == 4 * aug["n_train_raw"]
+        ), f"augment 後 train が 4N でない: {aug['n_train_raw']} -> {aug['n_train']}"
+        assert aug["n_val"] == stats["n_val"], "val が augment で変化 (拡張対象外のはず)"
+        assert aug["augment"] is True
+        assert (
+            aug["train_loss_last"] < aug["train_loss_first"] * 0.7
+        ), f"augment 学習が収束せず: {aug['train_loss_first']} -> {aug['train_loss_last']}"
+        print(
+            f"  augment OK: n_train {aug['n_train_raw']} -> {aug['n_train']} (4x), "
+            f"val={aug['n_val']} unchanged, loss {aug['train_loss_first']:.4f} -> {aug['train_loss_last']:.4f}"
+        )
     import json
 
     print(
@@ -312,6 +363,11 @@ def main() -> int:
     ap.add_argument("--val-frac", type=float, default=0.2)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="experiments/checkpoints/value_net")
+    ap.add_argument(
+        "--augment",
+        action="store_true",
+        help="train サブセットを 90/180/270° 回転で 4 倍に拡張 (H018、val は非拡張)",
+    )
     ap.add_argument(
         "--smoke",
         action="store_true",
@@ -336,6 +392,7 @@ def main() -> int:
         val_frac=args.val_frac,
         seed=args.seed,
         out_prefix=out_prefix,
+        augment=args.augment,
     )
     import json
 
