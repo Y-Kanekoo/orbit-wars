@@ -1,0 +1,57 @@
+{"info": "winrate_runner start", "total_jobs": 24, "already_done": 1, "pending_this_run": 23, "workers": 1}
+{"info": "winrate_runner start", "total_jobs": 24, "already_done": 1, "pending_this_run": 23, "workers": 1}
+{"done": "nearest_sniper:A:0", "agent_won": true, "error": null, "wall_sec": 116.2}
+{"done": "nearest_sniper:A:1", "agent_won": true, "error": null, "wall_sec": 135.4}
+{"done": "nearest_sniper:A:2", "agent_won": true, "error": null, "wall_sec": 80.8}
+{"done": "nearest_sniper:A:3", "agent_won": true, "error": null, "wall_sec": 61.9}
+{"done": "nearest_sniper:A:4", "agent_won": false, "error": null, "wall_sec": 129.5}
+{"done": "nearest_sniper:A:5", "agent_won": true, "error": null, "wall_sec": 122.5}
+{"done": "nearest_sniper:B:0", "agent_won": true, "error": null, "wall_sec": 129.2}
+{"done": "nearest_sniper:B:1", "agent_won": false, "error": null, "wall_sec": 132.9}
+{"done": "nearest_sniper:B:2", "agent_won": true, "error": null, "wall_sec": 138.6}
+{"done": "nearest_sniper:B:3", "agent_won": true, "error": null, "wall_sec": 94.8}
+{"done": "nearest_sniper:B:4", "agent_won": false, "error": null, "wall_sec": 129.4}
+{"done": "nearest_sniper:B:5", "agent_won": true, "error": null, "wall_sec": 102.0}
+{"done": "prev_best:A:1", "agent_won": false, "error": null, "wall_sec": 226.9}
+{"done": "prev_best:A:2", "agent_won": true, "error": null, "wall_sec": 256.9}
+{"done": "prev_best:A:3", "agent_won": false, "error": null, "wall_sec": 288.5}
+{"done": "prev_best:A:4", "agent_won": false, "error": null, "wall_sec": 273.2}
+{"done": "prev_best:A:5", "agent_won": true, "error": null, "wall_sec": 160.8}
+{"done": "prev_best:B:0", "agent_won": true, "error": null, "wall_sec": 177.0}
+{"done": "prev_best:B:1", "agent_won": true, "error": null, "wall_sec": 211.8}
+{"done": "prev_best:B:2", "agent_won": false, "error": null, "wall_sec": 276.3}
+{"done": "prev_best:B:3", "agent_won": false, "error": null, "wall_sec": 282.3}
+{"done": "prev_best:B:4", "agent_won": false, "error": null, "wall_sec": 276.5}
+{"done": "prev_best:B:5", "agent_won": true, "error": null, "wall_sec": 76.4}
+{
+  "mode": "nn_mcts_winrate_resumable",
+  "opponents": {
+    "nearest_sniper": {
+      "opponent": "nearest_sniper",
+      "n_target": 12,
+      "valid": 12,
+      "wins": 9,
+      "errors": 0,
+      "winrate": 0.75,
+      "losses": 3
+    },
+    "prev_best": {
+      "opponent": "prev_best",
+      "n_target": 12,
+      "valid": 12,
+      "wins": 5,
+      "errors": 0,
+      "winrate": 0.4167,
+      "losses": 7
+    }
+  },
+  "winrate_min": 0.4167,
+  "errors_total": 0,
+  "nn_env": {
+    "ORBIT_WARS_MCTS": "1",
+    "ORBIT_WARS_NN_VALUE": "1",
+    "ORBIT_WARS_NN_VALUE_MODEL": "experiments/checkpoints/value_net_c5.int8.onnx",
+    "ORBIT_WARS_NN_POLICY": ""
+  },
+  "measured_at": "2026-06-24T15:49:20Z"
+}
