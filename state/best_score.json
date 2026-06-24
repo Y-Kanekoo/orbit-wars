@@ -21,6 +21,15 @@
     "errors_total": 0,
     "measured_at": "2026-05-30T18:59:45Z"
   },
+  "prev_best_n100_baseline": {
+    "comment": "H030 (exp045) deliverable: gate の唯一 decision 軸 prev_best を高 N=100 で 1 回測定した安定 baseline 値。agent は現 main と byte-identical (noop beam, 提出 435.3)。discipline (gate hard/advisory・auto-submit) は supervisor 領分のため mix_eval section の gate baseline は不変、本フィールドは参照値として記録。",
+    "opponent": "docs/competition/legacy-388/main.py",
+    "n": 100,
+    "wins": 51,
+    "winrate": 0.51,
+    "measured_at": "2026-05-31T03:10:56Z",
+    "finding": "真値 ≈ 0.51 (ほぼコインフリップ)。N=30 で観測された 0.4667↔0.7 (range 0.23) は両側とも真値 0.51 から大きく外れた noise。legacy-388 mirror gate 軸は現 agent 周辺で識別力ほぼゼロ = N=30 単一測定で gate 判定するのは統計的に無効を確定 (learned_rules mixeval_prevbest_gate_noisy_misjudges_lb)。N=100 でも σ≈0.05 のため ±1σ 改善 (0.56) の検出も限界、go/no-go は LB delta 単独が妥当。"
+  },
   "submission_id": 53126719,
   "branch": "main",
   "merged_at": "2026-05-28T19:11:00Z",
